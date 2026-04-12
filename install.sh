@@ -431,8 +431,10 @@ download_release_tarball() {
 install_binary_from_tarball() {
   local tarball="$1" install_dir="$2"
   local tmpdir
-  tmpdir="$(mktemp -d)"
-  trap 'rm -rf "$tmpdir"' RETURN
+  tmpdir="$(mktemp -d)" || die "Failed to create temp directory"
+  # Expand path when registering the trap: on RETURN, `local tmpdir` may already be
+  # unset (set -u), so the trap must not reference $tmpdir at fire time.
+  trap "rm -rf $(sh_quote "$tmpdir")" RETURN
 
   tar -xzf "$tarball" -C "$tmpdir"
 
