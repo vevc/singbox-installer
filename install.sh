@@ -1006,8 +1006,9 @@ main() {
   if [[ -n "$argo_domain" ]]; then log "  argo_domain: ${argo_domain}"; fi
 
   local tmp_tgz
-  tmp_tgz="$(mktemp -t sing-box.XXXXXX.tar.gz)"
-  trap 'rm -f "$tmp_tgz"' EXIT
+  tmp_tgz="$(mktemp -t sing-box.XXXXXX.tar.gz)" || die "Failed to create temp tarball path"
+  # EXIT runs after `main` returns; `local tmp_tgz` may be unset then (set -u).
+  trap "rm -f $(sh_quote "$tmp_tgz")" EXIT
 
   download_release_tarball "$version" "$arch" "$tmp_tgz"
   install_binary_from_tarball "$tmp_tgz" "$install_dir"
