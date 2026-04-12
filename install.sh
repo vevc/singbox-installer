@@ -411,9 +411,18 @@ download_release_tarball() {
     [[ -n "$tag" ]] || die "Failed to determine latest version tag"
   fi
 
-  # Most releases use: sing-box-<tag>-linux-<arch>.tar.gz
-  local file="sing-box-${tag}-linux-${arch}.tar.gz"
-  local url="https://github.com/${REPO}/releases/download/${tag}/${file}"
+  # Release URL path uses Git tag (usually "v1.2.3"); tarball basename uses "1.2.3" (no leading v).
+  local path_tag="$tag"
+  if [[ "$path_tag" != v* && "$path_tag" == [0-9]* ]]; then
+    path_tag="v${path_tag}"
+  fi
+  local ver_in_file="$path_tag"
+  if [[ "$ver_in_file" == v* ]]; then
+    ver_in_file="${ver_in_file#v}"
+  fi
+
+  local file="sing-box-${ver_in_file}-linux-${arch}.tar.gz"
+  local url="https://github.com/${REPO}/releases/download/${path_tag}/${file}"
   log "Downloading ${url}"
 
   download_file "$url" "$out"
