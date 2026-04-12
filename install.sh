@@ -30,6 +30,7 @@ sing-box one-click installer (systemd, vless-ws/hy2/tuic + cloudflare argo tunne
 
 Usage:
   sudo ./install.sh [options]
+  sudo ./install.sh uninstall [--dry-run] [--purge]
 
 Options:
   --install-deps                 automatically install missing dependencies (default: disabled)
@@ -50,6 +51,10 @@ Options:
   --hy2-port <port>             hysteria2 port (UDP). set 0 to disable (default: 0)
   --tuic-port <port>            tuic port (UDP). set 0 to disable (default: 0)
   -h, --help                    show this help
+
+Uninstall:
+  --dry-run                     print planned paths; do not remove anything
+  --purge                       also remove config, certs, state, cloudflared config
 
 Notes:
   - This script generates a self-signed certificate. Clients must enable insecure/skip TLS verify.
