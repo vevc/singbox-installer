@@ -300,15 +300,19 @@ download_file() {
   need_http_client
   if command -v curl >/dev/null 2>&1; then
     if [[ "${DOWNLOAD_VERBOSE:-false}" == "true" ]]; then
-      curl -fL --retry 3 --retry-delay 1 -o "$out" "$url"
+      curl -fL --show-error --progress-bar --retry 3 --retry-delay 1 -o "$out" "$url" \
+        || die "Download failed: ${url} -> ${out}"
     else
-      curl -fsSL --retry 3 --retry-delay 1 -o "$out" "$url"
+      curl -fSsL --retry 3 --retry-delay 1 -o "$out" "$url" \
+        || die "Download failed: ${url} -> ${out}"
     fi
   else
     if [[ "${DOWNLOAD_VERBOSE:-false}" == "true" ]]; then
-      wget -O "$out" "$url"
+      wget -O "$out" "$url" \
+        || die "Download failed: ${url} -> ${out}"
     else
-      wget -q -O "$out" "$url"
+      wget -q -O "$out" "$url" \
+        || die "Download failed: ${url} -> ${out}"
     fi
   fi
 }
