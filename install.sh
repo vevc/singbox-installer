@@ -73,6 +73,34 @@ sh_quote() {
   printf "%q" "$1"
 }
 
+# Percent-encode for VLESS share-link query values (path=...). "/" -> %2F; reserved
+# chars in custom --ws-path do not break the URI. Prefer python3 when present (UTF-8).
+uri_encode_query_value() {
+  local s="$1"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$s"
+    return 0
+  fi
+  local out="" i c hex
+  local LC_ALL=C
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      [a-zA-Z0-9._~-])
+        out+="$c"
+        ;;
+      \')
+        out+="%27"
+        ;;
+      *)
+        printf -v hex '%%%02X' "'$c"
+        out+="$hex"
+        ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
 ensure_dir() {
   local d="$1"
   mkdir -p "$d"
@@ -836,20 +864,22 @@ write_subscription() {
       local vh="${vless_public_host}"
       local vp="${vless_public_port}"
       local vs="${vless_public_security}"
-      local vq="encryption=none&security=${vs}&type=ws&path=${ws_path}"
+      local enc_path
+      enc_path="$(uri_encode_query_value "$ws_path")"
+      local vq="encryption=none&security=${vs}&type=ws&path=${enc_path}"
       # Self-signed WSS: clients need skip-verify hints. With Argo, public TLS is Cloudflare-issued.
       if [[ "$argo_enabled" != "true" && "$vs" == "tls" ]]; then
         vq+="&allowInsecure=1&insecure=1"
       fi
-      lines+=("vless://${uuid}@${vh}:${vp}?${vq}#vless-ws-${name}")
+      lines+=("vless://${uuid}@${vh}:${vp}?${vq}#${name}-vless-ws")
     fi
 
     if [[ "$hy2_port" != "0" ]]; then
-      lines+=("hy2://${uuid}@${host}:${hy2_port}?insecure=1&allowInsecure=1#hy2-${name}")
+      lines+=("hy2://${uuid}@${host}:${hy2_port}?insecure=1&allowInsecure=1#${name}-hy2")
     fi
 
     if [[ "$tuic_port" != "0" ]]; then
-      lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?congestion_control=bbr&alpn=h3&insecure=1&allowInsecure=1#tuic-${name}")
+      lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?congestion_control=bbr&alpn=h3&insecure=1&allowInsecure=1#${name}-tuic")
     fi
   done
 
