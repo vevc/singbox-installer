@@ -477,7 +477,7 @@ download_release_tarball() {
 }
 
 install_binary_from_tarball() {
-  local tarball="$1" install_dir="$2"
+  local tarball="$1" install_dir="$2" ver_in_file="$3" arch="$4"
   local tmpdir
   tmpdir="$(mktemp -d)" || die "Failed to create temp directory"
   # Expand path when registering the trap: on RETURN, `local tmpdir` may already be
@@ -486,21 +486,11 @@ install_binary_from_tarball() {
 
   tar -xzf "$tarball" -C "$tmpdir"
 
-  local rel found
-  # Locate sing-box path from tar listing without sed/awk dependencies.
-  rel="$(
-    tar -tzf "$tarball" 2>/dev/null | while IFS= read -r line; do
-      case "$line" in
-        "${BIN_NAME}"|*/"${BIN_NAME}")
-          printf '%s\n' "$line"
-          break
-          ;;
-      esac
-    done
-  )"
-  [[ -n "$rel" ]] || die "Failed to locate ${BIN_NAME} in tarball listing"
-  found="${tmpdir}/${rel}"
-  [[ -f "$found" ]] || die "Failed to find extracted ${BIN_NAME} at ${found}"
+  local found
+  found="${tmpdir}/sing-box-${ver_in_file}-linux-${arch}/${BIN_NAME}"
+  if [[ ! -f "$found" ]]; then
+    die "Failed to find extracted ${BIN_NAME} at expected path: ${found}. Top-level: $(ls -1 "$tmpdir" 2>/dev/null | tr '\n' ' ')"
+  fi
 
   mkdir -p "$install_dir"
   install -m 0755 "$found" "${install_dir}/${BIN_NAME}"
@@ -1145,8 +1135,10 @@ main() {
   # EXIT runs after `main` returns; `local tmp_tgz` may be unset then (set -u).
   trap "rm -f $(sh_quote "$tmp_tgz")" EXIT
 
+  # sing-box release tarball layout is stable: sing-box-<ver>-linux-<arch>/sing-box
+  local ver_in_file="${version#v}"
   download_release_tarball "$version" "$arch" "$tmp_tgz"
-  install_binary_from_tarball "$tmp_tgz" "$install_dir"
+  install_binary_from_tarball "$tmp_tgz" "$install_dir" "$ver_in_file" "$arch"
 
   "${install_dir}/${BIN_NAME}" version || die "Installed binary failed to run"
 
