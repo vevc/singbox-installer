@@ -10,7 +10,7 @@ DEFAULT_VERSION="v1.13.7"
 DEFAULT_INSTALL_DIR="/usr/local/bin"
 DEFAULT_CONFIG_PATH="/etc/sing-box/config.json"
 DEFAULT_CERT_DIR="/etc/sing-box/certs"
-DEFAULT_CERT_CN="www.bing.com"
+DEFAULT_TLS_SERVER_NAME="www.bing.com"
 DEFAULT_VLESS_PORT="0"
 DEFAULT_HY2_PORT="0"
 DEFAULT_TUIC_PORT="0"
@@ -38,7 +38,7 @@ Install options:
   --install-dir <dir>             install dir for sing-box binary (default: /usr/local/bin)
   --config <path>                 config path (default: /etc/sing-box/config.json)
   --cert-dir <dir>                cert output dir (default: /etc/sing-box/certs)
-  --cert-cn <name>                self-signed cert CN (default: www.bing.com)
+  --tls-server-name <name>        TLS server name (SNI). Also used as CN for self-signed cert (default: www.bing.com)
   --host <public_ip>              address used in subscription (default: auto-detect)
   --user <name[:uuid]>            add a user (repeatable). uuid auto-generated if omitted
   --user-socks5 <spec>            bind user to socks5 outbound (repeatable)
@@ -846,13 +846,13 @@ EOF
 }
 
 write_subscription() {
-  local host="$1" vless_port="$2" hy2_port="$3" tuic_port="$4" ws_path="$5" vless_public_host="$6" vless_public_port="$7" vless_public_security="$8" argo_enabled="${9:-false}" cert_cn="${10:-www.bing.com}"
+  local host="$1" vless_port="$2" hy2_port="$3" tuic_port="$4" ws_path="$5" vless_public_host="$6" vless_public_port="$7" vless_public_security="$8" argo_enabled="${9:-false}" tls_server_name="${10:-www.bing.com}"
 
   ensure_dir "$STATE_DIR"
 
   local lines=()
   local enc_sni_cert enc_sni_public
-  enc_sni_cert="$(uri_encode_query_value "$cert_cn")"
+  enc_sni_cert="$(uri_encode_query_value "$tls_server_name")"
   enc_sni_public="$(uri_encode_query_value "$vless_public_host")"
 
   local idx
@@ -875,7 +875,7 @@ write_subscription() {
         enc_host_ws="${enc_sni_cert}"
       fi
       local vq="encryption=none&security=${vs}&type=ws&path=${enc_path}&host=${enc_host_ws}"
-      # TLS SNI: self-signed CN (--cert-cn) vs Argo public hostname (Cloudflare cert).
+      # TLS SNI: self-signed CN (--tls-server-name) vs Argo public hostname (Cloudflare cert).
       if [[ "$vs" == "tls" ]]; then
         if [[ "$argo_enabled" == "true" ]]; then
           vq+="&sni=${enc_sni_public}"
@@ -905,7 +905,7 @@ main() {
   local install_dir="$DEFAULT_INSTALL_DIR"
   local config_path="$DEFAULT_CONFIG_PATH"
   local cert_dir="$DEFAULT_CERT_DIR"
-  local cert_cn="$DEFAULT_CERT_CN"
+  local tls_server_name="$DEFAULT_TLS_SERVER_NAME"
   local host=""
   local vless_port="$DEFAULT_VLESS_PORT"
   local hy2_port="$DEFAULT_HY2_PORT"
@@ -982,7 +982,7 @@ main() {
       --install-dir) install_dir="${2:-}"; shift 2 ;;
       --config) config_path="${2:-}"; shift 2 ;;
       --cert-dir) cert_dir="${2:-}"; shift 2 ;;
-      --cert-cn) cert_cn="${2:-}"; shift 2 ;;
+      --tls-server-name) tls_server_name="${2:-}"; shift 2 ;;
       --host) host="${2:-}"; shift 2 ;;
       --vless-port) vless_port="${2:-}"; shift 2 ;;
       --ws-path) ws_path="${2:-}"; shift 2 ;;
@@ -1077,7 +1077,7 @@ main() {
   # - vless requires TLS only when argo is disabled (public WSS self-signed)
   # - hy2/tuic always require TLS
   if [[ "$hy2_port" != "0" || "$tuic_port" != "0" || ( "$vless_port" != "0" && "$argo_enabled" != "true" ) ]]; then
-    gen_self_signed_cert "$cert_dir" "$cert_cn"
+    gen_self_signed_cert "$cert_dir" "$tls_server_name"
   fi
 
   local vless_listen="::"
@@ -1142,7 +1142,7 @@ main() {
     vless_public_host="$argo_domain"
   fi
 
-  write_subscription "$host" "$vless_port" "$hy2_port" "$tuic_port" "$ws_path" "$vless_public_host" "$vless_public_port" "$vless_public_security" "$argo_enabled" "$cert_cn"
+  write_subscription "$host" "$vless_port" "$hy2_port" "$tuic_port" "$ws_path" "$vless_public_host" "$vless_public_port" "$vless_public_security" "$argo_enabled" "$tls_server_name"
   write_manifest "${install_dir}/${BIN_NAME}" "${install_dir}/cloudflared" "$config_path" "$cert_dir"
 
   log "Installed ${BIN_NAME} to ${install_dir}/${BIN_NAME}"
