@@ -387,8 +387,10 @@ build_tuic_inbound() {
       "users": [
 ${users_json}
       ],
+      "congestion_control": "bbr",
       "tls": {
         "enabled": true,
+        "alpn": ["h3"],
         "certificate_path": "$(json_escape "${cert_dir}/server.crt")",
         "key_path": "$(json_escape "${cert_dir}/server.key")"
       }
@@ -847,7 +849,7 @@ write_subscription() {
     fi
 
     if [[ "$tuic_port" != "0" ]]; then
-      lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?insecure=1&allowInsecure=1#tuic-${name}")
+      lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?congestion_control=bbr&alpn=h3&insecure=1&allowInsecure=1#tuic-${name}")
     fi
   done
 
