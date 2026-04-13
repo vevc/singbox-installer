@@ -593,6 +593,7 @@ EOF
 # Matches the long-lived tunnel hostname; avoids a separate probe that could differ from systemd.
 wait_trycloudflare_domain_from_journal() {
   local max_wait="${1:-60}"
+  local since_epoch="${2:-0}"
   local elapsed=0
   local domain=""
   need_cmd journalctl
@@ -600,7 +601,13 @@ wait_trycloudflare_domain_from_journal() {
   log "Waiting for Quick Tunnel hostname in cloudflared logs (up to ${max_wait}s)..."
   while [[ "$elapsed" -lt "$max_wait" ]]; do
     domain="$(
-      journalctl -u cloudflared.service -n 500 --no-pager -o cat 2>/dev/null \
+      if [[ "$since_epoch" != "0" ]]; then
+        journalctl -u cloudflared.service -b --since "@${since_epoch}" -n 500 --no-pager -o cat 2>/dev/null
+      else
+        journalctl -u cloudflared.service -b -n 500 --no-pager -o cat 2>/dev/null
+      fi \
+        | tr -d '\r' \
+        | sed -E $'s/\x1B\\[[0-9;]*[[:alpha:]]//g' \
         | sed -n 's/.*https:\/\/\([^[:space:]]*\.trycloudflare\.com\).*/\1/p' \
         | tail -n 1
     )"
@@ -1016,7 +1023,7 @@ main() {
   is_root || die "Please run as root (use sudo)."
 
   ensure_cmds_or_install "$install_deps" \
-    uname tar sed head tr cut dirname mkdir cat chmod install mktemp find
+    uname tar sed head tr cut dirname mkdir cat chmod install mktemp find date
   need_http_client
 
   local arch
@@ -1146,8 +1153,10 @@ main() {
         argo_domain=""
       fi
       write_cloudflared_service "$install_dir" "try" "$origin_url" ""
+      local since_epoch
+      since_epoch="$(date +%s)"
       systemd_reload_enable_start "cloudflared.service"
-      argo_domain="$(wait_trycloudflare_domain_from_journal 60)"
+      argo_domain="$(wait_trycloudflare_domain_from_journal 60 "$since_epoch")"
       [[ -n "$argo_domain" ]] || die "Failed to read Quick Tunnel domain from cloudflared logs. Try: journalctl -u cloudflared.service -n 80 --no-pager"
     else
       write_cloudflared_config "$origin_url"
