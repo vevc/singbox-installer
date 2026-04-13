@@ -9,7 +9,8 @@ REPO="SagerNet/sing-box"
 DEFAULT_VERSION="v1.13.7"
 DEFAULT_INSTALL_DIR="/usr/local/bin"
 DEFAULT_CONFIG_PATH="/etc/sing-box/config.json"
-DEFAULT_CERT_DIR="/etc/sing-box/certs"
+DEFAULT_TLS_CERT_PATH="/etc/sing-box/certs/server.crt"
+DEFAULT_TLS_KEY_PATH="/etc/sing-box/certs/server.key"
 DEFAULT_TLS_SERVER_NAME="www.bing.com"
 DEFAULT_TLS_CERT_NAME="www.bing.com"
 DEFAULT_VLESS_PORT="0"
@@ -40,7 +41,8 @@ Install options:
   --version <tag|latest>          sing-box version tag (default: v1.13.7)
   --install-dir <dir>             install dir for sing-box binary (default: /usr/local/bin)
   --config <path>                 config path (default: /etc/sing-box/config.json)
-  --cert-dir <dir>                cert output dir (default: /etc/sing-box/certs)
+  --tls-cert-path <path>          TLS certificate path (PEM). When set, --tls-key-path is required
+  --tls-key-path <path>           TLS private key path (PEM). When set, --tls-cert-path is required
   --tls-server-name <name>        TLS server name (SNI). Used in share links as sni/host (default: www.bing.com)
   --tls-cert-name <name>          Name used when generating a self-signed cert (CN) (default: www.bing.com)
   --host <public_ip>              address used in subscription (default: auto-detect)
@@ -371,11 +373,11 @@ EOF
 }
 
 build_vless_ws_inbound() {
-  local vless_port="$1" ws_path="$2" vless_listen="$3" vless_tls_enabled="$4" cert_dir="$5" users_json="$6"
+  local vless_port="$1" ws_path="$2" vless_listen="$3" vless_tls_enabled="$4" tls_cert_path="$5" tls_key_path="$6" users_json="$7"
 
   local tls_block=""
   if [[ "$vless_tls_enabled" == "true" ]]; then
-    tls_block=$',\n      "tls": {\n        "enabled": true,\n        "certificate_path": "'"$(json_escape "${cert_dir}/server.crt")"$'",\n        "key_path": "'"$(json_escape "${cert_dir}/server.key")"$'"\n      }'
+    tls_block=$',\n      "tls": {\n        "enabled": true,\n        "certificate_path": "'"$(json_escape "$tls_cert_path")"$'",\n        "key_path": "'"$(json_escape "$tls_key_path")"$'"\n      }'
   fi
 
   cat <<EOF
@@ -396,7 +398,7 @@ EOF
 }
 
 build_hy2_inbound() {
-  local hy2_port="$1" cert_dir="$2" users_json="$3"
+  local hy2_port="$1" tls_cert_path="$2" tls_key_path="$3" users_json="$4"
   cat <<EOF
     {
       "type": "hysteria2",
@@ -409,15 +411,15 @@ ${users_json}
       "tls": {
         "enabled": true,
         "alpn": ["h3"],
-        "certificate_path": "$(json_escape "${cert_dir}/server.crt")",
-        "key_path": "$(json_escape "${cert_dir}/server.key")"
+        "certificate_path": "$(json_escape "$tls_cert_path")",
+        "key_path": "$(json_escape "$tls_key_path")"
       }
     }
 EOF
 }
 
 build_tuic_inbound() {
-  local tuic_port="$1" cert_dir="$2" users_json="$3"
+  local tuic_port="$1" tls_cert_path="$2" tls_key_path="$3" users_json="$4"
   cat <<EOF
     {
       "type": "tuic",
@@ -431,8 +433,8 @@ ${users_json}
       "tls": {
         "enabled": true,
         "alpn": ["h3"],
-        "certificate_path": "$(json_escape "${cert_dir}/server.crt")",
-        "key_path": "$(json_escape "${cert_dir}/server.key")"
+        "certificate_path": "$(json_escape "$tls_cert_path")",
+        "key_path": "$(json_escape "$tls_key_path")"
       }
     }
 EOF
@@ -510,20 +512,17 @@ detect_public_ip() {
 }
 
 gen_self_signed_cert() {
-  local cert_dir="$1" cn="$2"
-  local key_path="${cert_dir}/server.key"
-  local crt_path="${cert_dir}/server.crt"
-
-  ensure_dir "$cert_dir"
+  local crt_path="$1" key_path="$2" cn="$3"
+  ensure_dir "$(dirname "$crt_path")"
 
   if [[ -s "$key_path" && -s "$crt_path" ]]; then
-    log "Existing certificate found in ${cert_dir}, reusing."
+    log "Existing certificate found (${crt_path}), reusing."
     CERT_MANAGED="false"
     return 0
   fi
 
   need_cmd openssl
-  log "Generating self-signed certificate in ${cert_dir}"
+  log "Generating self-signed certificate: ${crt_path}"
   openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
     -keyout "$key_path" \
     -out "$crt_path" \
@@ -626,13 +625,14 @@ wait_trycloudflare_domain_from_journal() {
 
 write_config() {
   local config_path="$1"
-  local cert_dir="$2"
-  local hy2_port="$3"
-  local tuic_port="$4"
-  local vless_port="$5"
-  local ws_path="$6"
-  local vless_listen="$7"
-  local vless_tls_enabled="$8" # true|false
+  local tls_cert_path="$2"
+  local tls_key_path="$3"
+  local hy2_port="$4"
+  local tuic_port="$5"
+  local vless_port="$6"
+  local ws_path="$7"
+  local vless_listen="$8"
+  local vless_tls_enabled="$9" # true|false
 
   local cfg_dir
   cfg_dir="$(dirname "$config_path")"
@@ -677,13 +677,13 @@ write_config() {
 
   local inbounds_json=()
   if [[ "$vless_port" != "0" ]]; then
-    inbounds_json+=("$(build_vless_ws_inbound "$vless_port" "$ws_path" "$vless_listen" "$vless_tls_enabled" "$cert_dir" "$users_vless")")
+    inbounds_json+=("$(build_vless_ws_inbound "$vless_port" "$ws_path" "$vless_listen" "$vless_tls_enabled" "$tls_cert_path" "$tls_key_path" "$users_vless")")
   fi
   if [[ "$hy2_port" != "0" ]]; then
-    inbounds_json+=("$(build_hy2_inbound "$hy2_port" "$cert_dir" "$users_hy2")")
+    inbounds_json+=("$(build_hy2_inbound "$hy2_port" "$tls_cert_path" "$tls_key_path" "$users_hy2")")
   fi
   if [[ "$tuic_port" != "0" ]]; then
-    inbounds_json+=("$(build_tuic_inbound "$tuic_port" "$cert_dir" "$users_tuic")")
+    inbounds_json+=("$(build_tuic_inbound "$tuic_port" "$tls_cert_path" "$tls_key_path" "$users_tuic")")
   fi
 
   if [[ "${#inbounds_json[@]}" -eq 0 ]]; then
@@ -768,20 +768,18 @@ write_manifest() {
   local singbox_bin="$1"
   local cloudflared_bin="$2"
   local config_path="$3"
-  local cert_dir="$4"
+  local tls_cert_path="$4"
+  local tls_key_path="$5"
   local singbox_unit="/etc/systemd/system/sing-box.service"
   local cloudflared_unit="/etc/systemd/system/cloudflared.service"
-  local cert_crt="${cert_dir}/server.crt"
-  local cert_key="${cert_dir}/server.key"
 
   ensure_dir "$STATE_DIR"
   cat >"$MANIFEST_FILE" <<EOF
 STATE_DIR=$(sh_quote "$STATE_DIR")
 SUB_FILE=$(sh_quote "$SUB_FILE")
 CONFIG_PATH=$(sh_quote "$config_path")
-CERT_DIR=$(sh_quote "$cert_dir")
-CERT_CRT=$(sh_quote "$cert_crt")
-CERT_KEY=$(sh_quote "$cert_key")
+TLS_CERT_PATH=$(sh_quote "$tls_cert_path")
+TLS_KEY_PATH=$(sh_quote "$tls_key_path")
 CERT_MANAGED=$(sh_quote "${CERT_MANAGED:-true}")
 SINGBOX_BIN=$(sh_quote "$singbox_bin")
 CLOUDFLARED_BIN=$(sh_quote "$cloudflared_bin")
@@ -816,9 +814,10 @@ EOF
   local singbox_bin="${DEFAULT_INSTALL_DIR}/${BIN_NAME}"
   local cloudflared_bin="${DEFAULT_INSTALL_DIR}/cloudflared"
   local config_path="$DEFAULT_CONFIG_PATH"
-  local cert_dir="$DEFAULT_CERT_DIR"
-  local cert_crt="${cert_dir}/server.crt"
-  local cert_key="${cert_dir}/server.key"
+  local tls_cert_path="$DEFAULT_TLS_CERT_PATH"
+  local tls_key_path="$DEFAULT_TLS_KEY_PATH"
+  local cert_dir
+  cert_dir="$(dirname "$tls_cert_path")"
   local cert_managed="true"
   local singbox_unit="/etc/systemd/system/sing-box.service"
   local cloudflared_unit="/etc/systemd/system/cloudflared.service"
@@ -829,9 +828,9 @@ EOF
     singbox_bin="${SINGBOX_BIN:-$singbox_bin}"
     cloudflared_bin="${CLOUDFLARED_BIN:-$cloudflared_bin}"
     config_path="${CONFIG_PATH:-$config_path}"
-    cert_dir="${CERT_DIR:-$cert_dir}"
-    cert_crt="${CERT_CRT:-${cert_dir}/server.crt}"
-    cert_key="${CERT_KEY:-${cert_dir}/server.key}"
+    tls_cert_path="${TLS_CERT_PATH:-$tls_cert_path}"
+    tls_key_path="${TLS_KEY_PATH:-$tls_key_path}"
+    cert_dir="$(dirname "$tls_cert_path")"
     cert_managed="${CERT_MANAGED:-$cert_managed}"
     singbox_unit="${SINGBOX_UNIT:-$singbox_unit}"
     cloudflared_unit="${CLOUDFLARED_UNIT:-$cloudflared_unit}"
@@ -843,8 +842,8 @@ EOF
   log "  singbox_unit: ${singbox_unit}"
   log "  cloudflared_unit: ${cloudflared_unit}"
   log "  config: ${config_path}"
-  log "  cert_crt: ${cert_crt}"
-  log "  cert_key: ${cert_key}"
+  log "  tls_cert_path: ${tls_cert_path}"
+  log "  tls_key_path: ${tls_key_path}"
   log "  cert_managed: ${cert_managed}"
   log "  cert_dir: ${cert_dir} (will remove if empty)"
   log "  state_dir: ${STATE_DIR}"
@@ -869,7 +868,7 @@ EOF
 
   rm -f "$config_path" 2>/dev/null || true
   if [[ "$cert_managed" == "true" ]]; then
-    rm -f "$cert_crt" "$cert_key" 2>/dev/null || true
+    rm -f "$tls_cert_path" "$tls_key_path" 2>/dev/null || true
   fi
   rm -f "$SUB_FILE" 2>/dev/null || true
   rm -f "$MANIFEST_FILE" 2>/dev/null || true
@@ -941,7 +940,8 @@ main() {
   local version="$DEFAULT_VERSION"
   local install_dir="$DEFAULT_INSTALL_DIR"
   local config_path="$DEFAULT_CONFIG_PATH"
-  local cert_dir="$DEFAULT_CERT_DIR"
+  local tls_cert_path=""
+  local tls_key_path=""
   local tls_server_name=""
   local tls_cert_name=""
   CERT_MANAGED="true"
@@ -1022,7 +1022,8 @@ main() {
       --version) version="${2:-}"; shift 2 ;;
       --install-dir) install_dir="${2:-}"; shift 2 ;;
       --config) config_path="${2:-}"; shift 2 ;;
-      --cert-dir) cert_dir="${2:-}"; shift 2 ;;
+      --tls-cert-path) tls_cert_path="${2:-}"; shift 2 ;;
+      --tls-key-path) tls_key_path="${2:-}"; shift 2 ;;
       --tls-server-name) tls_server_name="${2:-}"; shift 2 ;;
       --tls-cert-name) tls_cert_name="${2:-}"; shift 2 ;;
       --host) host="${2:-}"; shift 2 ;;
@@ -1086,6 +1087,17 @@ main() {
     tls_server_name="$tls_cert_name"
   fi
 
+  # TLS certificate path defaults:
+  # - If one is set, the other must also be set.
+  # - If neither is set, use default paths (and generate/reuse self-signed when needed).
+  if [[ -n "$tls_cert_path" || -n "$tls_key_path" ]]; then
+    [[ -n "$tls_cert_path" && -n "$tls_key_path" ]] || die "--tls-cert-path and --tls-key-path must be set together"
+    CERT_MANAGED="false"
+  else
+    tls_cert_path="$DEFAULT_TLS_CERT_PATH"
+    tls_key_path="$DEFAULT_TLS_KEY_PATH"
+  fi
+
   # Validate enabled ports are unique.
   if [[ "$vless_port" != "0" && "$hy2_port" != "0" && "$vless_port" == "$hy2_port" ]]; then
     die "--vless-port and --hy2-port cannot be the same"
@@ -1101,7 +1113,10 @@ main() {
   log "  version: ${version}"
   log "  install_dir: ${install_dir}"
   log "  config: ${config_path}"
-  log "  cert_dir: ${cert_dir}"
+  log "  tls_cert_path: ${tls_cert_path}"
+  log "  tls_key_path: ${tls_key_path}"
+  log "  tls_server_name: ${tls_server_name}"
+  log "  tls_cert_name: ${tls_cert_name}"
   log "  host: ${host}"
   log "  users: ${#USER_NAMES[@]}"
   log "  vless_port: ${vless_port}"
@@ -1132,7 +1147,9 @@ main() {
   # - vless requires TLS only when argo is disabled (public WSS self-signed)
   # - hy2/tuic always require TLS
   if [[ "$hy2_port" != "0" || "$tuic_port" != "0" || ( "$vless_port" != "0" && "$argo_enabled" != "true" ) ]]; then
-    gen_self_signed_cert "$cert_dir" "$tls_cert_name"
+    if [[ "$CERT_MANAGED" == "true" ]]; then
+      gen_self_signed_cert "$tls_cert_path" "$tls_key_path" "$tls_cert_name"
+    fi
   fi
 
   local vless_listen="::"
@@ -1158,7 +1175,7 @@ main() {
     fi
   fi
 
-  write_config "$config_path" "$cert_dir" "$hy2_port" "$tuic_port" "$vless_port" "$ws_path" "$vless_listen" "$vless_tls_enabled"
+  write_config "$config_path" "$tls_cert_path" "$tls_key_path" "$hy2_port" "$tuic_port" "$vless_port" "$ws_path" "$vless_listen" "$vless_tls_enabled"
 
   # Validate config before starting service.
   "${install_dir}/${BIN_NAME}" check -c "$config_path" || die "Config validation failed: ${config_path}"
@@ -1198,7 +1215,7 @@ main() {
   fi
 
   write_subscription "$host" "$vless_port" "$hy2_port" "$tuic_port" "$ws_path" "$vless_public_host" "$vless_public_port" "$vless_public_security" "$argo_enabled" "$tls_server_name"
-  write_manifest "${install_dir}/${BIN_NAME}" "${install_dir}/cloudflared" "$config_path" "$cert_dir"
+  write_manifest "${install_dir}/${BIN_NAME}" "${install_dir}/cloudflared" "$config_path" "$tls_cert_path" "$tls_key_path"
 
   log "Installed ${BIN_NAME} to ${install_dir}/${BIN_NAME}"
   log "Config: ${config_path}"
