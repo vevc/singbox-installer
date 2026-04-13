@@ -483,7 +483,8 @@ install_binary_from_tarball() {
   tar -xzf "$tarball" -C "$tmpdir"
 
   local rel found
-  rel="$(tar -tzf "$tarball" 2>/dev/null | sed -n "s#^\\(.*\\)${BIN_NAME}\\$#\\1${BIN_NAME}#p" | head -n 1 || true)"
+  # Locate sing-box path from tar listing without backrefs (busybox sed friendly).
+  rel="$(tar -tzf "$tarball" 2>/dev/null | sed -n "\\#${BIN_NAME}\\$#p" | head -n 1 || true)"
   [[ -n "$rel" ]] || die "Failed to locate ${BIN_NAME} in tarball listing"
   found="${tmpdir}/${rel}"
   [[ -f "$found" ]] || die "Failed to find extracted ${BIN_NAME} at ${found}"
