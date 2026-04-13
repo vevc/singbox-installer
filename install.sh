@@ -880,6 +880,7 @@ write_subscription() {
           vq+="&sni=${enc_sni_cert}"
         fi
       fi
+      vq+="&fp=chrome"
       lines+=("vless://${uuid}@${vh}:${vp}?${vq}#${name}-vless-ws")
     fi
 
