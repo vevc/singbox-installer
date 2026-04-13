@@ -65,7 +65,8 @@ EOF
 }
 
 die() { echo "ERROR: $*" >&2; exit 1; }
-log() { echo "[*] $*" >&2; }
+log() { echo "[*] $*"; }
+log_err() { echo "[*] $*" >&2; }
 
 sh_quote() {
   # Quote a string so it can be safely eval/source'd in bash.
@@ -585,7 +586,8 @@ wait_trycloudflare_domain_from_journal() {
   local domain=""
   need_cmd journalctl
 
-  log "Waiting for Quick Tunnel hostname in cloudflared logs (up to ${max_wait}s)..."
+  # This function is used via command substitution. Log to stderr to avoid polluting stdout.
+  log_err "Waiting for Quick Tunnel hostname in cloudflared logs (up to ${max_wait}s)..."
   while [[ "$elapsed" -lt "$max_wait" ]]; do
     domain="$(
       if [[ "$since_epoch" != "0" ]]; then
