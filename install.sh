@@ -11,6 +11,7 @@ DEFAULT_INSTALL_DIR="/usr/local/bin"
 DEFAULT_CONFIG_PATH="/etc/sing-box/config.json"
 DEFAULT_CERT_DIR="/etc/sing-box/certs"
 DEFAULT_TLS_SERVER_NAME="www.bing.com"
+DEFAULT_TLS_CERT_NAME="www.bing.com"
 DEFAULT_VLESS_PORT="0"
 DEFAULT_HY2_PORT="0"
 DEFAULT_TUIC_PORT="0"
@@ -38,7 +39,8 @@ Install options:
   --install-dir <dir>             install dir for sing-box binary (default: /usr/local/bin)
   --config <path>                 config path (default: /etc/sing-box/config.json)
   --cert-dir <dir>                cert output dir (default: /etc/sing-box/certs)
-  --tls-server-name <name>        TLS server name (SNI). Also used as CN for self-signed cert (default: www.bing.com)
+  --tls-server-name <name>        TLS server name (SNI). Used in share links as sni/host (default: www.bing.com)
+  --tls-cert-name <name>          Name used when generating a self-signed cert (CN) (default: www.bing.com)
   --host <public_ip>              address used in subscription (default: auto-detect)
   --user <name[:uuid]>            add a user (repeatable). uuid auto-generated if omitted
   --user-socks5 <spec>            bind user to socks5 outbound (repeatable)
@@ -930,7 +932,8 @@ main() {
   local install_dir="$DEFAULT_INSTALL_DIR"
   local config_path="$DEFAULT_CONFIG_PATH"
   local cert_dir="$DEFAULT_CERT_DIR"
-  local tls_server_name="$DEFAULT_TLS_SERVER_NAME"
+  local tls_server_name=""
+  local tls_cert_name=""
   CERT_MANAGED="true"
   local host=""
   local vless_port="$DEFAULT_VLESS_PORT"
@@ -1009,6 +1012,7 @@ main() {
       --config) config_path="${2:-}"; shift 2 ;;
       --cert-dir) cert_dir="${2:-}"; shift 2 ;;
       --tls-server-name) tls_server_name="${2:-}"; shift 2 ;;
+      --tls-cert-name) tls_cert_name="${2:-}"; shift 2 ;;
       --host) host="${2:-}"; shift 2 ;;
       --vless-port) vless_port="${2:-}"; shift 2 ;;
       --ws-path) ws_path="${2:-}"; shift 2 ;;
@@ -1057,6 +1061,18 @@ main() {
   fi
   [[ -n "$host" ]] || die "Failed to detect public IP. Please provide --host <public_ip>."
 
+  # TLS name defaults:
+  # - If neither is set, use defaults.
+  # - If only one is set, let the other follow it.
+  if [[ -z "$tls_server_name" && -z "$tls_cert_name" ]]; then
+    tls_server_name="$DEFAULT_TLS_SERVER_NAME"
+    tls_cert_name="$DEFAULT_TLS_CERT_NAME"
+  elif [[ -z "$tls_cert_name" ]]; then
+    tls_cert_name="$tls_server_name"
+  elif [[ -z "$tls_server_name" ]]; then
+    tls_server_name="$tls_cert_name"
+  fi
+
   # Validate enabled ports are unique.
   if [[ "$vless_port" != "0" && "$hy2_port" != "0" && "$vless_port" == "$hy2_port" ]]; then
     die "--vless-port and --hy2-port cannot be the same"
@@ -1103,7 +1119,7 @@ main() {
   # - vless requires TLS only when argo is disabled (public WSS self-signed)
   # - hy2/tuic always require TLS
   if [[ "$hy2_port" != "0" || "$tuic_port" != "0" || ( "$vless_port" != "0" && "$argo_enabled" != "true" ) ]]; then
-    gen_self_signed_cert "$cert_dir" "$tls_server_name"
+    gen_self_signed_cert "$cert_dir" "$tls_cert_name"
   fi
 
   local vless_listen="::"
