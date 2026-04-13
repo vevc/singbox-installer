@@ -818,7 +818,7 @@ EOF
 }
 
 write_subscription() {
-  local host="$1" vless_port="$2" hy2_port="$3" tuic_port="$4" ws_path="$5" vless_public_host="$6" vless_public_port="$7" vless_public_security="$8"
+  local host="$1" vless_port="$2" hy2_port="$3" tuic_port="$4" ws_path="$5" vless_public_host="$6" vless_public_port="$7" vless_public_security="$8" argo_enabled="${9:-false}"
 
   ensure_dir "$STATE_DIR"
 
@@ -834,15 +834,20 @@ write_subscription() {
       local vh="${vless_public_host}"
       local vp="${vless_public_port}"
       local vs="${vless_public_security}"
-      lines+=("vless://${uuid}@${vh}:${vp}?encryption=none&security=${vs}&type=ws&path=${ws_path}#vless-ws-${name}")
+      local vq="encryption=none&security=${vs}&type=ws&path=${ws_path}"
+      # Self-signed WSS: clients need skip-verify hints. With Argo, public TLS is Cloudflare-issued.
+      if [[ "$argo_enabled" != "true" && "$vs" == "tls" ]]; then
+        vq+="&allowInsecure=1&insecure=1"
+      fi
+      lines+=("vless://${uuid}@${vh}:${vp}?${vq}#vless-ws-${name}")
     fi
 
     if [[ "$hy2_port" != "0" ]]; then
-      lines+=("hy2://${uuid}@${host}:${hy2_port}?insecure=1#hy2-${name}")
+      lines+=("hy2://${uuid}@${host}:${hy2_port}?insecure=1&allowInsecure=1#hy2-${name}")
     fi
 
     if [[ "$tuic_port" != "0" ]]; then
-      lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?allow_insecure=1#tuic-${name}")
+      lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?insecure=1&allowInsecure=1#tuic-${name}")
     fi
   done
 
@@ -1089,7 +1094,7 @@ main() {
     vless_public_host="$argo_domain"
   fi
 
-  write_subscription "$host" "$vless_port" "$hy2_port" "$tuic_port" "$ws_path" "$vless_public_host" "$vless_public_port" "$vless_public_security"
+  write_subscription "$host" "$vless_port" "$hy2_port" "$tuic_port" "$ws_path" "$vless_public_host" "$vless_public_port" "$vless_public_security" "$argo_enabled"
   write_manifest "${install_dir}/${BIN_NAME}" "${install_dir}/cloudflared" "$config_path" "$cert_dir"
 
   log "Installed ${BIN_NAME} to ${install_dir}/${BIN_NAME}"
