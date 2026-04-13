@@ -757,6 +757,8 @@ write_manifest() {
   local cert_dir="$4"
   local singbox_unit="/etc/systemd/system/sing-box.service"
   local cloudflared_unit="/etc/systemd/system/cloudflared.service"
+  local cert_crt="${cert_dir}/server.crt"
+  local cert_key="${cert_dir}/server.key"
 
   ensure_dir "$STATE_DIR"
   cat >"$MANIFEST_FILE" <<EOF
@@ -764,6 +766,8 @@ STATE_DIR=$(sh_quote "$STATE_DIR")
 SUB_FILE=$(sh_quote "$SUB_FILE")
 CONFIG_PATH=$(sh_quote "$config_path")
 CERT_DIR=$(sh_quote "$cert_dir")
+CERT_CRT=$(sh_quote "$cert_crt")
+CERT_KEY=$(sh_quote "$cert_key")
 SINGBOX_BIN=$(sh_quote "$singbox_bin")
 CLOUDFLARED_BIN=$(sh_quote "$cloudflared_bin")
 SINGBOX_UNIT=$(sh_quote "$singbox_unit")
@@ -798,6 +802,8 @@ EOF
   local cloudflared_bin="${DEFAULT_INSTALL_DIR}/cloudflared"
   local config_path="$DEFAULT_CONFIG_PATH"
   local cert_dir="$DEFAULT_CERT_DIR"
+  local cert_crt="${cert_dir}/server.crt"
+  local cert_key="${cert_dir}/server.key"
   local singbox_unit="/etc/systemd/system/sing-box.service"
   local cloudflared_unit="/etc/systemd/system/cloudflared.service"
 
@@ -808,6 +814,8 @@ EOF
     cloudflared_bin="${CLOUDFLARED_BIN:-$cloudflared_bin}"
     config_path="${CONFIG_PATH:-$config_path}"
     cert_dir="${CERT_DIR:-$cert_dir}"
+    cert_crt="${CERT_CRT:-${cert_dir}/server.crt}"
+    cert_key="${CERT_KEY:-${cert_dir}/server.key}"
     singbox_unit="${SINGBOX_UNIT:-$singbox_unit}"
     cloudflared_unit="${CLOUDFLARED_UNIT:-$cloudflared_unit}"
   fi
@@ -818,7 +826,9 @@ EOF
   log "  singbox_unit: ${singbox_unit}"
   log "  cloudflared_unit: ${cloudflared_unit}"
   log "  config: ${config_path}"
-  log "  cert_dir: ${cert_dir}"
+  log "  cert_crt: ${cert_crt}"
+  log "  cert_key: ${cert_key}"
+  log "  cert_dir: ${cert_dir} (will remove if empty)"
   log "  state_dir: ${STATE_DIR}"
   log "  dry_run: ${dry_run}"
 
@@ -838,11 +848,16 @@ EOF
 
   rm -f "$singbox_bin" 2>/dev/null || true
   rm -f "$cloudflared_bin" 2>/dev/null || true
-  rm -f "$MANIFEST_FILE" 2>/dev/null || true
 
   rm -f "$config_path" 2>/dev/null || true
-  rm -rf "$cert_dir" 2>/dev/null || true
-  rm -rf "$STATE_DIR" 2>/dev/null || true
+  rm -f "$cert_crt" "$cert_key" 2>/dev/null || true
+  rm -f "$SUB_FILE" 2>/dev/null || true
+  rm -f "$MANIFEST_FILE" 2>/dev/null || true
+
+  # Remove empty directories only (safe cleanup).
+  rmdir "$cert_dir" 2>/dev/null || true
+  rmdir "$(dirname "$config_path")" 2>/dev/null || true
+  rmdir "$STATE_DIR" 2>/dev/null || true
 
   log "Uninstall complete."
 }
