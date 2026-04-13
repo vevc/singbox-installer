@@ -24,6 +24,7 @@ SUB_FILE="${STATE_DIR}/sub.txt"
 MANIFEST_FILE="${STATE_DIR}/manifest.env"
 
 BIN_NAME="sing-box"
+DOWNLOAD_VERBOSE="false"
 
 usage() {
   cat <<'EOF'
@@ -35,6 +36,7 @@ Usage:
 
 Install options:
   --install-deps                  automatically install missing dependencies (default: disabled)
+  --verbose                       show download progress and extra logs
   --version <tag|latest>          sing-box version tag (default: v1.13.7)
   --install-dir <dir>             install dir for sing-box binary (default: /usr/local/bin)
   --config <path>                 config path (default: /etc/sing-box/config.json)
@@ -149,7 +151,6 @@ deps_for_cmd() {
     systemctl) echo "systemd" ;;
     timeout|mktemp|sha256sum|uname|dirname|head|tr|cut|cat|chmod|install|mkdir) echo "coreutils" ;;
     sed) echo "sed" ;;
-    find) echo "findutils" ;;
     *) echo "" ;;
   esac
 }
@@ -296,9 +297,17 @@ download_file() {
   local out="$2"
   need_http_client
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --retry 3 --retry-delay 1 -o "$out" "$url"
+    if [[ "${DOWNLOAD_VERBOSE:-false}" == "true" ]]; then
+      curl -fL --retry 3 --retry-delay 1 -o "$out" "$url"
+    else
+      curl -fsSL --retry 3 --retry-delay 1 -o "$out" "$url"
+    fi
   else
-    wget -q -O "$out" "$url"
+    if [[ "${DOWNLOAD_VERBOSE:-false}" == "true" ]]; then
+      wget -O "$out" "$url"
+    else
+      wget -q -O "$out" "$url"
+    fi
   fi
 }
 
@@ -471,10 +480,11 @@ install_binary_from_tarball() {
 
   tar -xzf "$tarball" -C "$tmpdir"
 
-  local found
-  found="$(find "$tmpdir" -type f -name "$BIN_NAME" -perm -u+x 2>/dev/null | head -n 1 || true)"
-  [[ -n "$found" ]] || found="$(find "$tmpdir" -type f -name "$BIN_NAME" 2>/dev/null | head -n 1 || true)"
-  [[ -n "$found" ]] || die "Failed to find ${BIN_NAME} in tarball"
+  local rel found
+  rel="$(tar -tzf "$tarball" 2>/dev/null | sed -n "s#^\\(.*\\)${BIN_NAME}\\$#\\1${BIN_NAME}#p" | head -n 1 || true)"
+  [[ -n "$rel" ]] || die "Failed to locate ${BIN_NAME} in tarball listing"
+  found="${tmpdir}/${rel}"
+  [[ -f "$found" ]] || die "Failed to find extracted ${BIN_NAME} at ${found}"
 
   mkdir -p "$install_dir"
   install -m 0755 "$found" "${install_dir}/${BIN_NAME}"
@@ -944,6 +954,7 @@ main() {
   local argo_domain=""
   local argo_token=""
   local install_deps="false"
+  local verbose="false"
 
   # Multi-user support (parallel arrays).
   USER_NAMES=()
@@ -957,6 +968,7 @@ main() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --install-deps) install_deps="true"; shift 1 ;;
+      --verbose) verbose="true"; shift 1 ;;
       --user)
         # name[:uuid]
         local spec="${2:-}"; shift 2
@@ -1028,8 +1040,9 @@ main() {
 
   is_root || die "Please run as root (use sudo)."
 
+  DOWNLOAD_VERBOSE="$verbose"
   ensure_cmds_or_install "$install_deps" \
-    uname tar sed head tr cut dirname mkdir cat chmod install mktemp find date
+    uname tar sed head tr cut dirname mkdir cat chmod install mktemp date
   need_http_client
 
   local arch
