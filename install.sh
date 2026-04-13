@@ -506,6 +506,7 @@ gen_self_signed_cert() {
 
   if [[ -s "$key_path" && -s "$crt_path" ]]; then
     log "Existing certificate found in ${cert_dir}, reusing."
+    CERT_MANAGED="false"
     return 0
   fi
 
@@ -518,6 +519,7 @@ gen_self_signed_cert() {
 
   chmod 600 "$key_path"
   chmod 644 "$crt_path"
+  CERT_MANAGED="true"
 }
 
 install_cloudflared() {
@@ -768,6 +770,7 @@ CONFIG_PATH=$(sh_quote "$config_path")
 CERT_DIR=$(sh_quote "$cert_dir")
 CERT_CRT=$(sh_quote "$cert_crt")
 CERT_KEY=$(sh_quote "$cert_key")
+CERT_MANAGED=$(sh_quote "${CERT_MANAGED:-true}")
 SINGBOX_BIN=$(sh_quote "$singbox_bin")
 CLOUDFLARED_BIN=$(sh_quote "$cloudflared_bin")
 SINGBOX_UNIT=$(sh_quote "$singbox_unit")
@@ -804,6 +807,7 @@ EOF
   local cert_dir="$DEFAULT_CERT_DIR"
   local cert_crt="${cert_dir}/server.crt"
   local cert_key="${cert_dir}/server.key"
+  local cert_managed="true"
   local singbox_unit="/etc/systemd/system/sing-box.service"
   local cloudflared_unit="/etc/systemd/system/cloudflared.service"
 
@@ -816,6 +820,7 @@ EOF
     cert_dir="${CERT_DIR:-$cert_dir}"
     cert_crt="${CERT_CRT:-${cert_dir}/server.crt}"
     cert_key="${CERT_KEY:-${cert_dir}/server.key}"
+    cert_managed="${CERT_MANAGED:-$cert_managed}"
     singbox_unit="${SINGBOX_UNIT:-$singbox_unit}"
     cloudflared_unit="${CLOUDFLARED_UNIT:-$cloudflared_unit}"
   fi
@@ -828,6 +833,7 @@ EOF
   log "  config: ${config_path}"
   log "  cert_crt: ${cert_crt}"
   log "  cert_key: ${cert_key}"
+  log "  cert_managed: ${cert_managed}"
   log "  cert_dir: ${cert_dir} (will remove if empty)"
   log "  state_dir: ${STATE_DIR}"
   log "  dry_run: ${dry_run}"
@@ -850,7 +856,9 @@ EOF
   rm -f "$cloudflared_bin" 2>/dev/null || true
 
   rm -f "$config_path" 2>/dev/null || true
-  rm -f "$cert_crt" "$cert_key" 2>/dev/null || true
+  if [[ "$cert_managed" == "true" ]]; then
+    rm -f "$cert_crt" "$cert_key" 2>/dev/null || true
+  fi
   rm -f "$SUB_FILE" 2>/dev/null || true
   rm -f "$MANIFEST_FILE" 2>/dev/null || true
 
@@ -923,6 +931,7 @@ main() {
   local config_path="$DEFAULT_CONFIG_PATH"
   local cert_dir="$DEFAULT_CERT_DIR"
   local tls_server_name="$DEFAULT_TLS_SERVER_NAME"
+  CERT_MANAGED="true"
   local host=""
   local vless_port="$DEFAULT_VLESS_PORT"
   local hy2_port="$DEFAULT_HY2_PORT"
