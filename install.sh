@@ -870,7 +870,14 @@ write_subscription() {
       local vs="${vless_public_security}"
       local enc_path
       enc_path="$(uri_encode_query_value "$ws_path")"
-      local vq="encryption=none&security=${vs}&type=ws&path=${enc_path}"
+      # WS Host header: match public hostname (Argo) or cert CN when address is IP (self-signed).
+      local enc_host_ws
+      if [[ "$argo_enabled" == "true" ]]; then
+        enc_host_ws="${enc_sni_public}"
+      else
+        enc_host_ws="${enc_sni_cert}"
+      fi
+      local vq="encryption=none&security=${vs}&type=ws&path=${enc_path}&host=${enc_host_ws}"
       # TLS SNI: self-signed CN (--cert-cn) vs Argo public hostname (Cloudflare cert).
       if [[ "$vs" == "tls" ]]; then
         if [[ "$argo_enabled" == "true" ]]; then
