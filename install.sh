@@ -397,6 +397,7 @@ ${users_json}
       ],
       "tls": {
         "enabled": true,
+        "alpn": ["h3"],
         "certificate_path": "$(json_escape "${cert_dir}/server.crt")",
         "key_path": "$(json_escape "${cert_dir}/server.key")"
       }
@@ -848,11 +849,14 @@ EOF
 }
 
 write_subscription() {
-  local host="$1" vless_port="$2" hy2_port="$3" tuic_port="$4" ws_path="$5" vless_public_host="$6" vless_public_port="$7" vless_public_security="$8" argo_enabled="${9:-false}"
+  local host="$1" vless_port="$2" hy2_port="$3" tuic_port="$4" ws_path="$5" vless_public_host="$6" vless_public_port="$7" vless_public_security="$8" argo_enabled="${9:-false}" cert_cn="${10:-www.bing.com}"
 
   ensure_dir "$STATE_DIR"
 
   local lines=()
+  local enc_sni_cert enc_sni_public
+  enc_sni_cert="$(uri_encode_query_value "$cert_cn")"
+  enc_sni_public="$(uri_encode_query_value "$vless_public_host")"
 
   local idx
   for idx in "${!USER_NAMES[@]}"; do
@@ -867,19 +871,24 @@ write_subscription() {
       local enc_path
       enc_path="$(uri_encode_query_value "$ws_path")"
       local vq="encryption=none&security=${vs}&type=ws&path=${enc_path}"
-      # Self-signed WSS: clients need skip-verify hints. With Argo, public TLS is Cloudflare-issued.
-      if [[ "$argo_enabled" != "true" && "$vs" == "tls" ]]; then
-        vq+="&allowInsecure=1&insecure=1"
+      # TLS SNI: self-signed CN (--cert-cn) vs Argo public hostname (Cloudflare cert).
+      if [[ "$vs" == "tls" ]]; then
+        if [[ "$argo_enabled" == "true" ]]; then
+          vq+="&sni=${enc_sni_public}"
+        else
+          vq+="&allowInsecure=1&insecure=1"
+          vq+="&sni=${enc_sni_cert}"
+        fi
       fi
       lines+=("vless://${uuid}@${vh}:${vp}?${vq}#${name}-vless-ws")
     fi
 
     if [[ "$hy2_port" != "0" ]]; then
-      lines+=("hy2://${uuid}@${host}:${hy2_port}?insecure=1&allowInsecure=1#${name}-hy2")
+      lines+=("hy2://${uuid}@${host}:${hy2_port}?insecure=1&allowInsecure=1&alpn=h3&sni=${enc_sni_cert}#${name}-hy2")
     fi
 
     if [[ "$tuic_port" != "0" ]]; then
-      lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?congestion_control=bbr&alpn=h3&insecure=1&allowInsecure=1#${name}-tuic")
+      lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?congestion_control=bbr&alpn=h3&insecure=1&allowInsecure=1&sni=${enc_sni_cert}#${name}-tuic")
     fi
   done
 
@@ -1126,7 +1135,7 @@ main() {
     vless_public_host="$argo_domain"
   fi
 
-  write_subscription "$host" "$vless_port" "$hy2_port" "$tuic_port" "$ws_path" "$vless_public_host" "$vless_public_port" "$vless_public_security" "$argo_enabled"
+  write_subscription "$host" "$vless_port" "$hy2_port" "$tuic_port" "$ws_path" "$vless_public_host" "$vless_public_port" "$vless_public_security" "$argo_enabled" "$cert_cn"
   write_manifest "${install_dir}/${BIN_NAME}" "${install_dir}/cloudflared" "$config_path" "$cert_dir"
 
   log "Installed ${BIN_NAME} to ${install_dir}/${BIN_NAME}"
