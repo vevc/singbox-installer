@@ -30,7 +30,7 @@ sing-box one-click installer (systemd, vless-ws/hy2/tuic + cloudflare argo tunne
 
 Usage:
   sudo ./install.sh [options]
-  sudo ./install.sh uninstall [--dry-run] [--purge]
+  sudo ./install.sh uninstall [--dry-run]
 
 Options:
   --install-deps                 automatically install missing dependencies (default: disabled)
@@ -54,7 +54,6 @@ Options:
 
 Uninstall:
   --dry-run                     print planned paths; do not remove anything
-  --purge                       also remove config, certs, state
 
 Notes:
   - This script generates a self-signed certificate. Clients must enable insecure/skip TLS verify.
@@ -553,8 +552,7 @@ write_cloudflared_service() {
   if [[ "$argo_mode" == "try" ]]; then
     exec="${install_dir}/cloudflared tunnel --no-autoupdate --url ${origin_url}"
   elif [[ "$argo_mode" == "token" ]]; then
-    # For Named Tunnel, prefer Cloudflare-managed ingress (Public Hostname) instead of
-    # generating a local /etc/cloudflared/config.yml, which can easily conflict.
+    # Named Tunnel: prefer Cloudflare-managed ingress (Public Hostname).
     exec="${install_dir}/cloudflared tunnel --no-autoupdate run --token ${argo_token}"
   else
     die "write_cloudflared_service called with invalid mode: ${argo_mode}"
@@ -773,21 +771,18 @@ EOF
 }
 
 uninstall_main() {
-  local purge="false"
   local dry_run="false"
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --purge) purge="true"; shift 1 ;;
       --dry-run) dry_run="true"; shift 1 ;;
       -h|--help)
         cat <<'EOF'
 Usage:
-  sudo ./install.sh uninstall [--dry-run] [--purge]
+  sudo ./install.sh uninstall [--dry-run]
 
 Options:
   --dry-run   Print actions without executing
-  --purge     Remove config/certs/state files too
 EOF
         exit 0
         ;;
@@ -823,7 +818,6 @@ EOF
   log "  config: ${config_path}"
   log "  cert_dir: ${cert_dir}"
   log "  state_dir: ${STATE_DIR}"
-  log "  purge: ${purge}"
   log "  dry_run: ${dry_run}"
 
   if [[ "$dry_run" == "true" ]]; then
@@ -844,11 +838,9 @@ EOF
   rm -f "$cloudflared_bin" 2>/dev/null || true
   rm -f "$MANIFEST_FILE" 2>/dev/null || true
 
-  if [[ "$purge" == "true" ]]; then
-    rm -f "$config_path" 2>/dev/null || true
-    rm -rf "$cert_dir" 2>/dev/null || true
-    rm -rf "$STATE_DIR" 2>/dev/null || true
-  fi
+  rm -f "$config_path" 2>/dev/null || true
+  rm -rf "$cert_dir" 2>/dev/null || true
+  rm -rf "$STATE_DIR" 2>/dev/null || true
 
   log "Uninstall complete."
 }
