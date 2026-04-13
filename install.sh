@@ -294,9 +294,9 @@ download_file() {
   local out="$2"
   need_http_client
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 3 --retry-delay 1 -o "$out" "$url"
+    curl -fsSL --retry 3 --retry-delay 1 -o "$out" "$url"
   else
-    wget -O "$out" "$url"
+    wget -q -O "$out" "$url"
   fi
 }
 
