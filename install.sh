@@ -1230,7 +1230,11 @@ main() {
   log "Installed ${BIN_NAME} to ${install_dir}/${BIN_NAME}"
   log "Config: ${config_path}"
   if [[ "$hy2_port" != "0" || "$tuic_port" != "0" || ( "$vless_port" != "0" && "$argo_enabled" != "true" ) ]]; then
-    log "Cert: ${cert_dir}/server.crt (self-signed)"
+    if [[ "${CERT_MANAGED:-false}" == "true" ]]; then
+      log "Cert: ${tls_cert_path} (self-signed)"
+    else
+      log "Cert: ${tls_cert_path} (existing)"
+    fi
   fi
   log "Subscription file: ${SUB_FILE}"
   log "Import links:"
