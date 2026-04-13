@@ -54,7 +54,7 @@ Options:
 
 Uninstall:
   --dry-run                     print planned paths; do not remove anything
-  --purge                       also remove config, certs, state, cloudflared config
+  --purge                       also remove config, certs, state
 
 Notes:
   - This script generates a self-signed certificate. Clients must enable insecure/skip TLS verify.
@@ -541,19 +541,6 @@ install_cloudflared() {
   "$out" --version >/dev/null 2>&1 || die "cloudflared installed but failed to run"
 }
 
-write_cloudflared_config() {
-  local origin_url="$1"
-  local config_dir="/etc/cloudflared"
-  local config_path="${config_dir}/config.yml"
-
-  ensure_dir "$config_dir"
-  cat >"$config_path" <<EOF
-ingress:
-  - service: ${origin_url}
-  - service: http_status:404
-EOF
-}
-
 write_cloudflared_service() {
   local install_dir="$1"
   local argo_mode="$2"
@@ -566,7 +553,9 @@ write_cloudflared_service() {
   if [[ "$argo_mode" == "try" ]]; then
     exec="${install_dir}/cloudflared tunnel --no-autoupdate --url ${origin_url}"
   elif [[ "$argo_mode" == "token" ]]; then
-    exec="${install_dir}/cloudflared tunnel --no-autoupdate --config /etc/cloudflared/config.yml run --token ${argo_token}"
+    # For Named Tunnel, prefer Cloudflare-managed ingress (Public Hostname) instead of
+    # generating a local /etc/cloudflared/config.yml, which can easily conflict.
+    exec="${install_dir}/cloudflared tunnel --no-autoupdate run --token ${argo_token}"
   else
     die "write_cloudflared_service called with invalid mode: ${argo_mode}"
   fi
@@ -768,7 +757,6 @@ write_manifest() {
   local cert_dir="$4"
   local singbox_unit="/etc/systemd/system/sing-box.service"
   local cloudflared_unit="/etc/systemd/system/cloudflared.service"
-  local cloudflared_config="/etc/cloudflared/config.yml"
 
   ensure_dir "$STATE_DIR"
   cat >"$MANIFEST_FILE" <<EOF
@@ -780,7 +768,6 @@ SINGBOX_BIN=$(sh_quote "$singbox_bin")
 CLOUDFLARED_BIN=$(sh_quote "$cloudflared_bin")
 SINGBOX_UNIT=$(sh_quote "$singbox_unit")
 CLOUDFLARED_UNIT=$(sh_quote "$cloudflared_unit")
-CLOUDFLARED_CONFIG=$(sh_quote "$cloudflared_config")
 EOF
   chmod 600 "$MANIFEST_FILE" 2>/dev/null || true
 }
@@ -816,7 +803,6 @@ EOF
   local cert_dir="$DEFAULT_CERT_DIR"
   local singbox_unit="/etc/systemd/system/sing-box.service"
   local cloudflared_unit="/etc/systemd/system/cloudflared.service"
-  local cloudflared_config="/etc/cloudflared/config.yml"
 
   if [[ -r "$MANIFEST_FILE" ]]; then
     # shellcheck disable=SC1090
@@ -827,7 +813,6 @@ EOF
     cert_dir="${CERT_DIR:-$cert_dir}"
     singbox_unit="${SINGBOX_UNIT:-$singbox_unit}"
     cloudflared_unit="${CLOUDFLARED_UNIT:-$cloudflared_unit}"
-    cloudflared_config="${CLOUDFLARED_CONFIG:-$cloudflared_config}"
   fi
 
   log "Uninstall plan:"
@@ -862,7 +847,6 @@ EOF
   if [[ "$purge" == "true" ]]; then
     rm -f "$config_path" 2>/dev/null || true
     rm -rf "$cert_dir" 2>/dev/null || true
-    rm -f "$cloudflared_config" 2>/dev/null || true
     rm -rf "$STATE_DIR" 2>/dev/null || true
   fi
 
@@ -1159,7 +1143,6 @@ main() {
       argo_domain="$(wait_trycloudflare_domain_from_journal 60 "$since_epoch")"
       [[ -n "$argo_domain" ]] || die "Failed to read Quick Tunnel domain from cloudflared logs. Try: journalctl -u cloudflared.service -n 80 --no-pager"
     else
-      write_cloudflared_config "$origin_url"
       write_cloudflared_service "$install_dir" "token" "$origin_url" "$argo_token"
       systemd_reload_enable_start "cloudflared.service"
     fi
