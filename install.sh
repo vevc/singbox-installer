@@ -66,7 +66,7 @@ EOF
 }
 
 die() { echo "ERROR: $*" >&2; exit 1; }
-log() { echo "[*] $*"; }
+log() { echo "[*] $*" >&2; }
 
 sh_quote() {
   # Quote a string so it can be safely eval/source'd in bash.
@@ -589,15 +589,29 @@ WantedBy=multi-user.target
 EOF
 }
 
-detect_trycloudflare_domain() {
-  local install_dir="$1"
-  local origin_url="$2"
+# After cloudflared.service is running (Quick Tunnel), read the same process's URL from journald.
+# Matches the long-lived tunnel hostname; avoids a separate probe that could differ from systemd.
+wait_trycloudflare_domain_from_journal() {
+  local max_wait="${1:-60}"
+  local elapsed=0
+  local domain=""
+  need_cmd journalctl
 
-  need_cmd timeout
-  # Capture first trycloudflare domain from output.
-  local out
-  out="$(timeout 20s "${install_dir}/cloudflared" tunnel --no-autoupdate --url "${origin_url}" 2>&1 || true)"
-  echo "$out" | sed -n 's/.*https:\/\/\([^[:space:]]*\.trycloudflare\.com\).*/\1/p' | head -n 1
+  log "Waiting for Quick Tunnel hostname in cloudflared logs (up to ${max_wait}s)..."
+  while [[ "$elapsed" -lt "$max_wait" ]]; do
+    domain="$(
+      journalctl -u cloudflared.service -n 500 --no-pager -o cat 2>/dev/null \
+        | sed -n 's/.*https:\/\/\([^[:space:]]*\.trycloudflare\.com\).*/\1/p' \
+        | tail -n 1
+    )"
+    if [[ -n "$domain" ]]; then
+      printf '%s' "$domain"
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  return 1
 }
 
 write_config() {
@@ -1131,15 +1145,16 @@ main() {
         log "Ignoring --argo-domain without --argo-token (temporary tunnel domain is assigned automatically)."
         argo_domain=""
       fi
-      argo_domain="$(detect_trycloudflare_domain "$install_dir" "$origin_url")"
-      [[ -n "$argo_domain" ]] || die "Failed to detect trycloudflare domain. Please re-run."
       write_cloudflared_service "$install_dir" "try" "$origin_url" ""
+      systemd_reload_enable_start "cloudflared.service"
+      argo_domain="$(wait_trycloudflare_domain_from_journal 60)"
+      [[ -n "$argo_domain" ]] || die "Failed to read Quick Tunnel domain from cloudflared logs. Try: journalctl -u cloudflared.service -n 80 --no-pager"
     else
       write_cloudflared_config "$origin_url"
       write_cloudflared_service "$install_dir" "token" "$origin_url" "$argo_token"
+      systemd_reload_enable_start "cloudflared.service"
     fi
 
-    systemd_reload_enable_start "cloudflared.service"
     vless_public_host="$argo_domain"
   fi
 
