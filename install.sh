@@ -32,28 +32,28 @@ Usage:
   sudo ./install.sh [options]
   sudo ./install.sh uninstall [--dry-run]
 
-Options:
-  --install-deps                 automatically install missing dependencies (default: disabled)
-  --version <tag|latest>        sing-box version tag (default: v1.13.7)
-  --install-dir <dir>           install dir for sing-box binary (default: /usr/local/bin)
-  --config <path>               config path (default: /etc/sing-box/config.json)
-  --cert-dir <dir>              cert output dir (default: /etc/sing-box/certs)
-  --cert-cn <name>              self-signed cert CN (default: www.bing.com)
-  --host <public_ip>            address used in subscription (default: auto-detect)
-  --user <name[:uuid]>          add a user (repeatable). uuid auto-generated if omitted
-  --user-socks5 <spec>          bind user to socks5 outbound (repeatable)
-                               spec: name=host:port[:username:password]
-  --vless-port <port>           vless+ws port (TCP). set 0 to disable (default: 0)
-  --ws-path <path>              websocket path for vless+ws (default: /)
-  --argo                         enable Cloudflare Tunnel for vless (default: disabled)
-  --argo-domain <domain>         public domain for a Named Tunnel (used only when --argo-token is also set)
-  --argo-token <token>           Named Tunnel token (when set -> use Named Tunnel; otherwise -> use Quick Tunnel with a *.trycloudflare.com domain)
-  --hy2-port <port>             hysteria2 port (UDP). set 0 to disable (default: 0)
-  --tuic-port <port>            tuic port (UDP). set 0 to disable (default: 0)
-  -h, --help                    show this help
+Install options:
+  --install-deps                  automatically install missing dependencies (default: disabled)
+  --version <tag|latest>          sing-box version tag (default: v1.13.7)
+  --install-dir <dir>             install dir for sing-box binary (default: /usr/local/bin)
+  --config <path>                 config path (default: /etc/sing-box/config.json)
+  --cert-dir <dir>                cert output dir (default: /etc/sing-box/certs)
+  --cert-cn <name>                self-signed cert CN (default: www.bing.com)
+  --host <public_ip>              address used in subscription (default: auto-detect)
+  --user <name[:uuid]>            add a user (repeatable). uuid auto-generated if omitted
+  --user-socks5 <spec>            bind user to socks5 outbound (repeatable)
+                                 spec: name=host:port[:username:password]
+  --vless-port <port>             vless+ws port (TCP). set 0 to disable (default: 0)
+  --ws-path <path>                websocket path for vless+ws (default: /)
+  --argo                          enable Cloudflare Tunnel for vless (default: disabled)
+  --argo-domain <domain>          public domain for a Named Tunnel (used only when --argo-token is also set)
+  --argo-token <token>            Named Tunnel token (when set -> use Named Tunnel; otherwise -> use Quick Tunnel with a *.trycloudflare.com domain)
+  --hy2-port <port>               hysteria2 port (UDP). set 0 to disable (default: 0)
+  --tuic-port <port>              tuic port (UDP). set 0 to disable (default: 0)
+  -h, --help                      show this help
 
-Uninstall:
-  --dry-run                     print planned paths; do not remove anything
+Uninstall options:
+  --dry-run                      print planned paths; do not remove anything
 
 Notes:
   - This script generates a self-signed certificate. Clients must enable insecure/skip TLS verify.
