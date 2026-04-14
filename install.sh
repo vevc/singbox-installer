@@ -45,6 +45,7 @@ Install options:
   --tls-key-path <path>           TLS private key path (PEM). When set, --tls-cert-path is required
   --tls-server-name <name>        TLS server name (SNI). Used in share links as sni/host (default: www.bing.com)
   --tls-cert-name <name>          Name used when generating a self-signed cert (CN) (default: www.bing.com)
+  --tls-trusted                   treat TLS cert as trusted; omit insecure/allowInsecure in share links
   --host <public_ip>              address used in subscription (default: auto-detect)
   --user <name[:uuid]>            add a user (repeatable). uuid auto-generated if omitted
   --user-socks5 <spec>            bind user to socks5 outbound (repeatable)
@@ -62,7 +63,8 @@ Uninstall options:
   --dry-run                      print planned paths; do not remove anything
 
 Notes:
-  - This script generates a self-signed certificate. Clients must enable insecure/skip TLS verify.
+  - By default a self-signed certificate is generated; clients usually need insecure/skip TLS verify in share links.
+  - With a trusted CA certificate, pass --tls-trusted so insecure/allowInsecure are omitted from share links.
   - vless+ws behavior:
       - argo disabled: vless is exposed publicly as WSS with self-signed cert.
       - argo enabled: vless listens on 127.0.0.1 with plain WS; cloudflared provides public HTTPS.
@@ -886,7 +888,7 @@ EOF
 }
 
 write_subscription() {
-  local host="$1" vless_port="$2" hy2_port="$3" tuic_port="$4" ws_path="$5" vless_public_host="$6" vless_public_port="$7" vless_public_security="$8" argo_enabled="${9:-false}" tls_server_name="${10:-www.bing.com}"
+  local host="$1" vless_port="$2" hy2_port="$3" tuic_port="$4" ws_path="$5" vless_public_host="$6" vless_public_port="$7" vless_public_security="$8" argo_enabled="${9:-false}" tls_server_name="${10:-www.bing.com}" tls_trusted="${11:-false}"
 
   ensure_dir "$STATE_DIR"
 
@@ -920,7 +922,9 @@ write_subscription() {
         if [[ "$argo_enabled" == "true" ]]; then
           vq+="&sni=${enc_sni_public}"
         else
-          vq+="&allowInsecure=1&insecure=1"
+          if [[ "$tls_trusted" != "true" ]]; then
+            vq+="&allowInsecure=1&insecure=1"
+          fi
           vq+="&sni=${enc_sni_cert}"
         fi
       fi
@@ -929,11 +933,19 @@ write_subscription() {
     fi
 
     if [[ "$hy2_port" != "0" ]]; then
-      lines+=("hy2://${uuid}@${host}:${hy2_port}?insecure=1&allowInsecure=1&alpn=h3&sni=${enc_sni_cert}#${name}-hy2")
+      local hq="alpn=h3&sni=${enc_sni_cert}"
+      if [[ "$tls_trusted" != "true" ]]; then
+        hq="insecure=1&allowInsecure=1&${hq}"
+      fi
+      lines+=("hy2://${uuid}@${host}:${hy2_port}?${hq}#${name}-hy2")
     fi
 
     if [[ "$tuic_port" != "0" ]]; then
-      lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?congestion_control=bbr&alpn=h3&insecure=1&allowInsecure=1&sni=${enc_sni_cert}#${name}-tuic")
+      local tq="congestion_control=bbr&alpn=h3&sni=${enc_sni_cert}"
+      if [[ "$tls_trusted" != "true" ]]; then
+        tq="${tq}&insecure=1&allowInsecure=1"
+      fi
+      lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?${tq}#${name}-tuic")
     fi
   done
 
@@ -959,6 +971,7 @@ main() {
   local argo_token=""
   local install_deps="false"
   local verbose="false"
+  local tls_trusted="false"
 
   # Multi-user support (parallel arrays).
   USER_NAMES=()
@@ -973,6 +986,7 @@ main() {
     case "$1" in
       --install-deps) install_deps="true"; shift 1 ;;
       --verbose) verbose="true"; shift 1 ;;
+      --tls-trusted) tls_trusted="true"; shift 1 ;;
       --user)
         # name[:uuid]
         local spec="${2:-}"; shift 2
@@ -1220,7 +1234,7 @@ main() {
     vless_public_host="$argo_domain"
   fi
 
-  write_subscription "$host" "$vless_port" "$hy2_port" "$tuic_port" "$ws_path" "$vless_public_host" "$vless_public_port" "$vless_public_security" "$argo_enabled" "$tls_server_name"
+  write_subscription "$host" "$vless_port" "$hy2_port" "$tuic_port" "$ws_path" "$vless_public_host" "$vless_public_port" "$vless_public_security" "$argo_enabled" "$tls_server_name" "$tls_trusted"
   write_manifest "${install_dir}/${BIN_NAME}" "${install_dir}/cloudflared" "$config_path" "$tls_cert_path" "$tls_key_path"
 
   log "Installed ${BIN_NAME} to ${install_dir}/${BIN_NAME}"
