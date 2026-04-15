@@ -34,33 +34,39 @@ sing-box one-click installer (systemd, vless-ws/hy2/tuic + cloudflare argo tunne
 Usage:
   sudo ./install.sh [options]
   sudo ./install.sh uninstall [--dry-run]
+EOF
 
-Install options:
-  --install-deps                  automatically install missing dependencies (default: disabled)
-  --verbose                       show download progress and extra logs
-  --version <tag|latest>          sing-box version tag (default: v1.13.7)
-  --install-dir <dir>             install dir for sing-box binary (default: /usr/local/bin)
-  --config <path>                 config path (default: /etc/sing-box/config.json)
-  --tls-cert-path <path>          TLS certificate path (PEM). When set, --tls-key-path is required
-  --tls-key-path <path>           TLS private key path (PEM). When set, --tls-cert-path is required
-  --tls-server-name <name>        TLS server name (SNI). Used in share links as sni/host (default: www.bing.com)
-  --tls-cert-name <name>          Name used when generating a self-signed cert (CN) (default: www.bing.com)
-  --tls-trusted                   treat TLS cert as trusted; omit insecure/allowInsecure in share links
-  --host <public_ip>              address used in subscription (default: auto-detect)
-  --user <name[:uuid]>            add a user (repeatable). uuid auto-generated if omitted
-  --user-socks5 <spec>            bind user to socks5 outbound (repeatable)
-                                 spec: name=host:port[:username:password]
-  --vless-port <port>             vless+ws port (TCP). set 0 to disable (default: 0)
-  --ws-path <path>                websocket path for vless+ws (default: /)
-  --argo                          enable Cloudflare Tunnel for vless (default: disabled)
-  --argo-domain <domain>          public domain for a Named Tunnel (used only when --argo-token is also set)
-  --argo-token <token>            Named Tunnel token (when set -> use Named Tunnel; otherwise -> use Quick Tunnel with a *.trycloudflare.com domain)
-  --hy2-port <port>               hysteria2 port (UDP). set 0 to disable (default: 0)
-  --tuic-port <port>              tuic port (UDP). set 0 to disable (default: 0)
-  -h, --help                      show this help
+  echo
+  echo "Install options:"
+  local w=36
+  printf "  %-${w}s %s\n" "--install-deps" "automatically install missing dependencies (default: disabled)"
+  printf "  %-${w}s %s\n" "--verbose" "show download progress and extra logs"
+  printf "  %-${w}s %s\n" "--version <tag|latest>" "sing-box version tag (default: v1.13.7)"
+  printf "  %-${w}s %s\n" "--install-dir <dir>" "install dir for sing-box binary (default: /usr/local/bin)"
+  printf "  %-${w}s %s\n" "--config <path>" "config path (default: /etc/sing-box/config.json)"
+  printf "  %-${w}s %s\n" "--tls-cert-path <path>" "TLS certificate path (PEM). When set, --tls-key-path is required"
+  printf "  %-${w}s %s\n" "--tls-key-path <path>" "TLS private key path (PEM). When set, --tls-cert-path is required"
+  printf "  %-${w}s %s\n" "--tls-server-name <name>" "TLS server name (SNI). Used in share links as sni/host (default: www.bing.com)"
+  printf "  %-${w}s %s\n" "--tls-cert-name <name>" "Name used when generating a self-signed cert (CN) (default: www.bing.com)"
+  printf "  %-${w}s %s\n" "--tls-trusted" "treat TLS cert as trusted; omit insecure/allowInsecure in share links"
+  printf "  %-${w}s %s\n" "--host <public_ip>" "address used in subscription (default: auto-detect)"
+  printf "  %-${w}s %s\n" "--user <name[:uuid]>" "add a user (repeatable). uuid auto-generated if omitted"
+  printf "  %-${w}s %s\n" "--user-socks5 <spec>" "bind user to socks5 outbound (repeatable)"
+  printf "  %-${w}s %s\n" "" "spec: name=host:port[:username:password]"
+  printf "  %-${w}s %s\n" "--vless-port <port|public:listen>" "vless+ws port (TCP). NAT mapping supported. set 0 to disable (default: 0)"
+  printf "  %-${w}s %s\n" "--ws-path <path>" "websocket path for vless+ws (default: /)"
+  printf "  %-${w}s %s\n" "--argo" "enable Cloudflare Tunnel for vless (default: disabled)"
+  printf "  %-${w}s %s\n" "--argo-domain <domain>" "public domain for a Named Tunnel (used only when --argo-token is also set)"
+  printf "  %-${w}s %s\n" "--argo-token <token>" "Named Tunnel token (when set -> use Named Tunnel; otherwise -> use Quick Tunnel with a *.trycloudflare.com domain)"
+  printf "  %-${w}s %s\n" "--hy2-port <port|public:listen>" "hysteria2 port (UDP). NAT mapping supported. set 0 to disable (default: 0)"
+  printf "  %-${w}s %s\n" "--tuic-port <port|public:listen>" "tuic port (UDP). NAT mapping supported. set 0 to disable (default: 0)"
+  printf "  %-${w}s %s\n" "-h, --help" "show this help"
 
-Uninstall options:
-  --dry-run                      print planned paths; do not remove anything
+  echo
+  echo "Uninstall options:"
+  printf "  %-${w}s %s\n" "--dry-run" "print planned paths; do not remove anything"
+
+  cat <<'EOF'
 
 Notes:
   - By default a self-signed certificate is generated; clients usually need insecure/skip TLS verify in share links.
@@ -69,6 +75,7 @@ Notes:
       - argo disabled: vless is exposed publicly as WSS with self-signed cert.
       - argo enabled: vless listens on 127.0.0.1 with plain WS; cloudflared provides public HTTPS.
   - hy2 (hysteria2) and tuic are UDP-based; ensure firewall allows UDP ports.
+  - NAT/port-mapping: use public:listen format, e.g. --hy2-port 28443:8443 (share link uses 28443, server listens on 8443).
 EOF
 }
 
@@ -77,8 +84,30 @@ log() { echo "[*] $*"; }
 log_err() { echo "[*] $*" >&2; }
 
 sh_quote() {
-  # Quote a string so it can be safely eval/source'd in bash.
   printf "%q" "$1"
+}
+
+# Parse port spec "port" or "public:listen". Sets two global reply vars.
+# Usage: parse_port "--hy2-port" "28443:8443"
+#   -> _PORT_PUBLIC=28443  _PORT_LISTEN=8443
+# Usage: parse_port "--hy2-port" "8443"
+#   -> _PORT_PUBLIC=8443   _PORT_LISTEN=8443
+_PORT_PUBLIC=""
+_PORT_LISTEN=""
+parse_port() {
+  local flag="$1" val="$2"
+  if [[ "$val" == *:* ]]; then
+    _PORT_PUBLIC="${val%%:*}"
+    _PORT_LISTEN="${val#*:}"
+    [[ "$_PORT_PUBLIC" =~ ^[0-9]+$ && "$_PORT_LISTEN" =~ ^[0-9]+$ ]] || die "Invalid ${flag} value: ${val} (expected [public:]listen)"
+    if [[ "$_PORT_PUBLIC" == "0" || "$_PORT_LISTEN" == "0" ]]; then
+      [[ "$_PORT_PUBLIC" == "0" && "$_PORT_LISTEN" == "0" ]] || die "Invalid ${flag} value: ${val} (use 0 to disable, not 0:port or port:0)"
+    fi
+  else
+    [[ "$val" =~ ^[0-9]+$ ]] || die "Invalid ${flag} value: ${val} (expected [public:]listen)"
+    _PORT_PUBLIC="$val"
+    _PORT_LISTEN="$val"
+  fi
 }
 
 # Percent-encode for VLESS share-link query values (path=...). "/" -> %2F; reserved
@@ -962,9 +991,12 @@ main() {
   local tls_cert_name=""
   CERT_MANAGED="true"
   local host=""
-  local vless_port="$DEFAULT_VLESS_PORT"
-  local hy2_port="$DEFAULT_HY2_PORT"
-  local tuic_port="$DEFAULT_TUIC_PORT"
+  local vless_listen_port="$DEFAULT_VLESS_PORT"
+  local vless_public_port="$DEFAULT_VLESS_PORT"
+  local hy2_listen_port="$DEFAULT_HY2_PORT"
+  local hy2_public_port="$DEFAULT_HY2_PORT"
+  local tuic_listen_port="$DEFAULT_TUIC_PORT"
+  local tuic_public_port="$DEFAULT_TUIC_PORT"
   local ws_path="$DEFAULT_WS_PATH"
   local argo_enabled="$DEFAULT_ARGO_ENABLED"
   local argo_domain=""
@@ -1045,13 +1077,13 @@ main() {
       --tls-server-name) tls_server_name="${2:-}"; shift 2 ;;
       --tls-cert-name) tls_cert_name="${2:-}"; shift 2 ;;
       --host) host="${2:-}"; shift 2 ;;
-      --vless-port) vless_port="${2:-}"; shift 2 ;;
+      --vless-port) parse_port "--vless-port" "${2:-}"; vless_public_port="$_PORT_PUBLIC"; vless_listen_port="$_PORT_LISTEN"; shift 2 ;;
       --ws-path) ws_path="${2:-}"; shift 2 ;;
       --argo) argo_enabled="true"; shift 1 ;;
       --argo-domain) argo_domain="${2:-}"; shift 2 ;;
       --argo-token) argo_token="${2:-}"; shift 2 ;;
-      --hy2-port) hy2_port="${2:-}"; shift 2 ;;
-      --tuic-port) tuic_port="${2:-}"; shift 2 ;;
+      --hy2-port) parse_port "--hy2-port" "${2:-}"; hy2_public_port="$_PORT_PUBLIC"; hy2_listen_port="$_PORT_LISTEN"; shift 2 ;;
+      --tuic-port) parse_port "--tuic-port" "${2:-}"; tuic_public_port="$_PORT_PUBLIC"; tuic_listen_port="$_PORT_LISTEN"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) die "Unknown option: $1" ;;
     esac
@@ -1116,15 +1148,15 @@ main() {
     tls_key_path="$DEFAULT_TLS_KEY_PATH"
   fi
 
-  # Validate enabled ports are unique.
-  if [[ "$vless_port" != "0" && "$hy2_port" != "0" && "$vless_port" == "$hy2_port" ]]; then
-    die "--vless-port and --hy2-port cannot be the same"
+  # Validate enabled listen ports are unique (they bind to the same host).
+  if [[ "$vless_listen_port" != "0" && "$hy2_listen_port" != "0" && "$vless_listen_port" == "$hy2_listen_port" ]]; then
+    die "--vless-port and --hy2-port listen ports cannot be the same (${vless_listen_port})"
   fi
-  if [[ "$vless_port" != "0" && "$tuic_port" != "0" && "$vless_port" == "$tuic_port" ]]; then
-    die "--vless-port and --tuic-port cannot be the same"
+  if [[ "$vless_listen_port" != "0" && "$tuic_listen_port" != "0" && "$vless_listen_port" == "$tuic_listen_port" ]]; then
+    die "--vless-port and --tuic-port listen ports cannot be the same (${vless_listen_port})"
   fi
-  if [[ "$hy2_port" != "0" && "$tuic_port" != "0" && "$hy2_port" == "$tuic_port" ]]; then
-    die "--hy2-port and --tuic-port cannot be the same"
+  if [[ "$hy2_listen_port" != "0" && "$tuic_listen_port" != "0" && "$hy2_listen_port" == "$tuic_listen_port" ]]; then
+    die "--hy2-port and --tuic-port listen ports cannot be the same (${hy2_listen_port})"
   fi
 
   log "Preparing to install:"
@@ -1140,9 +1172,21 @@ main() {
   log "  verbose: ${verbose}"
   log "  host: ${host}"
   log "  users: ${#USER_NAMES[@]}"
-  log "  vless_port: ${vless_port}"
-  log "  hy2_port: ${hy2_port}"
-  log "  tuic_port: ${tuic_port}"
+  if [[ "$vless_listen_port" == "$vless_public_port" ]]; then
+    log "  vless_port: ${vless_listen_port}"
+  else
+    log "  vless_port: ${vless_public_port}:${vless_listen_port} (public:listen)"
+  fi
+  if [[ "$hy2_listen_port" == "$hy2_public_port" ]]; then
+    log "  hy2_port: ${hy2_listen_port}"
+  else
+    log "  hy2_port: ${hy2_public_port}:${hy2_listen_port} (public:listen)"
+  fi
+  if [[ "$tuic_listen_port" == "$tuic_public_port" ]]; then
+    log "  tuic_port: ${tuic_listen_port}"
+  else
+    log "  tuic_port: ${tuic_public_port}:${tuic_listen_port} (public:listen)"
+  fi
   log "  ws_path: ${ws_path}"
   log "  argo_enabled: ${argo_enabled}"
   if [[ -n "$argo_domain" ]]; then log "  argo_domain: ${argo_domain}"; fi
@@ -1159,7 +1203,7 @@ main() {
 
   "${install_dir}/${BIN_NAME}" version || die "Installed binary failed to run"
 
-  if [[ "$argo_enabled" == "true" && "$vless_port" == "0" ]]; then
+  if [[ "$argo_enabled" == "true" && "$vless_listen_port" == "0" ]]; then
     die "--argo requires --vless-port to be enabled (non-zero)"
   fi
   if [[ -n "$argo_token" && -z "$argo_domain" ]]; then
@@ -1169,7 +1213,7 @@ main() {
   # Cert generation:
   # - vless requires TLS only when argo is disabled (public WSS self-signed)
   # - hy2/tuic always require TLS
-  if [[ "$hy2_port" != "0" || "$tuic_port" != "0" || ( "$vless_port" != "0" && "$argo_enabled" != "true" ) ]]; then
+  if [[ "$hy2_listen_port" != "0" || "$tuic_listen_port" != "0" || ( "$vless_listen_port" != "0" && "$argo_enabled" != "true" ) ]]; then
     if [[ "$CERT_MANAGED" == "true" ]]; then
       gen_self_signed_cert "$tls_cert_path" "$tls_key_path" "$tls_cert_name"
     fi
@@ -1178,27 +1222,25 @@ main() {
   local vless_listen="::"
   local vless_tls_enabled="false"
   local vless_public_host="$host"
-  local vless_public_port="$vless_port"
+  local vless_sub_port="$vless_public_port"
   local vless_public_security="none"
 
-  if [[ "$vless_port" != "0" ]]; then
+  if [[ "$vless_listen_port" != "0" ]]; then
     if [[ "$argo_enabled" != "true" ]]; then
-      # Public WSS with self-signed cert.
       vless_listen="::"
       vless_tls_enabled="true"
       vless_public_host="$host"
-      vless_public_port="$vless_port"
+      vless_sub_port="$vless_public_port"
       vless_public_security="tls"
     else
-      # Only local origin; cloudflared provides public HTTPS on 443.
       vless_listen="127.0.0.1"
       vless_tls_enabled="false"
-      vless_public_port="443"
+      vless_sub_port="443"
       vless_public_security="tls"
     fi
   fi
 
-  write_config "$config_path" "$tls_cert_path" "$tls_key_path" "$hy2_port" "$tuic_port" "$vless_port" "$ws_path" "$vless_listen" "$vless_tls_enabled"
+  write_config "$config_path" "$tls_cert_path" "$tls_key_path" "$hy2_listen_port" "$tuic_listen_port" "$vless_listen_port" "$ws_path" "$vless_listen" "$vless_tls_enabled"
 
   # Validate config before starting service.
   "${install_dir}/${BIN_NAME}" check -c "$config_path" || die "Config validation failed: ${config_path}"
@@ -1209,7 +1251,7 @@ main() {
   # Setup cloudflared if needed.
   if [[ "$argo_enabled" == "true" ]]; then
     install_cloudflared "$install_dir"
-    local origin_url="http://127.0.0.1:${vless_port}"
+    local origin_url="http://127.0.0.1:${vless_listen_port}"
 
     local argo_mode=""
     if [[ -n "$argo_domain" && -n "$argo_token" ]]; then
@@ -1237,12 +1279,12 @@ main() {
     vless_public_host="$argo_domain"
   fi
 
-  write_subscription "$host" "$vless_port" "$hy2_port" "$tuic_port" "$ws_path" "$vless_public_host" "$vless_public_port" "$vless_public_security" "$argo_enabled" "$tls_server_name" "$tls_trusted"
+  write_subscription "$host" "$vless_public_port" "$hy2_public_port" "$tuic_public_port" "$ws_path" "$vless_public_host" "$vless_sub_port" "$vless_public_security" "$argo_enabled" "$tls_server_name" "$tls_trusted"
   write_manifest "${install_dir}/${BIN_NAME}" "${install_dir}/cloudflared" "$config_path" "$tls_cert_path" "$tls_key_path"
 
   log "Installed ${BIN_NAME} to ${install_dir}/${BIN_NAME}"
   log "Config: ${config_path}"
-  if [[ "$hy2_port" != "0" || "$tuic_port" != "0" || ( "$vless_port" != "0" && "$argo_enabled" != "true" ) ]]; then
+  if [[ "$hy2_listen_port" != "0" || "$tuic_listen_port" != "0" || ( "$vless_listen_port" != "0" && "$argo_enabled" != "true" ) ]]; then
     if [[ "${CERT_MANAGED:-false}" == "true" ]]; then
       log "Cert: ${tls_cert_path} (self-signed)"
     else
