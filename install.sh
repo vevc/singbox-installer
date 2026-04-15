@@ -558,10 +558,20 @@ gen_self_signed_cert() {
 
   need_cmd openssl
   log "Generating self-signed certificate: ${crt_path}"
-  openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+  # openssl prints keygen progress ('.' and '+') to stderr; keep install logs clean.
+  # On failure, dump stderr so the user can diagnose.
+  local openssl_err
+  openssl_err="$(mktemp -t openssl.XXXXXX.err)" || die "Failed to create temp file"
+  if ! openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
     -keyout "$key_path" \
     -out "$crt_path" \
-    -subj "/CN=${cn}"
+    -subj "/CN=${cn}" \
+    2>"$openssl_err"; then
+    cat "$openssl_err" >&2 || true
+    rm -f "$openssl_err" || true
+    die "openssl certificate generation failed"
+  fi
+  rm -f "$openssl_err" || true
 
   chmod 600 "$key_path"
   chmod 644 "$crt_path"
