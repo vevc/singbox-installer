@@ -557,7 +557,9 @@ gen_self_signed_cert() {
   fi
 
   need_cmd openssl
-  log "Generating self-signed certificate: ${crt_path}"
+  log "Generating self-signed certificate:"
+  log "  crt: ${crt_path}"
+  log "  key: ${key_path}"
   # openssl prints keygen progress ('.' and '+') to stderr; keep install logs clean.
   # On failure, dump stderr so the user can diagnose.
   local openssl_err
