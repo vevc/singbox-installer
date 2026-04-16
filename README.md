@@ -1,6 +1,6 @@
 # singbox-installer
 
-一个面向个人使用的 `sing-box` 一键安装脚本（Linux + systemd），支持按**用户名分流**（`auth_user`）并可选将指定用户的流量转发到自定义 **SOCKS5 出站**。同时支持 **Cloudflare Tunnel（Argo）**为 VLESS+WS 提供公网入口。
+一个面向个人使用的 `sing-box` 一键安装脚本（Linux + systemd），支持按**用户名分流**（`auth_user`）并可选将指定用户的流量转发到自定义 **SOCKS5 出站**。同时支持 **Cloudflare Tunnel（Argo）** 为 VLESS+WS 提供公网入口。
 
 ## 功能
 
