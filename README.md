@@ -180,3 +180,7 @@ curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/instal
 ## License
 
 本项目以 [MIT License](LICENSE) 开源。
+
+## 赞助
+
+- 感谢 [TalorData](https://talordata.com/?campaignid=6200Bs8MUgqRU4D4&utm_source=YouTube&utm_term=vevcore) 提供赞助支持。
