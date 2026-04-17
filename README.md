@@ -38,6 +38,21 @@
 curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/install.sh" | sudo bash -s -- --help
 ```
 
+## 快速入门（小白一键三协议）
+
+一条命令同时开 **VLESS / HY2 / TUIC**，并自动装依赖。`--host` 填公网 IP；能自动探测时可不写。
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/install.sh" | sudo bash -s -- \
+  --install-deps \
+  --host "<YOUR_SERVER_PUBLIC_IP>" \
+  --vless-port 8080 \
+  --hy2-port 8443 \
+  --tuic-port 9443
+```
+
+安装结束后终端会打印订阅内容，文件在 `/var/lib/sing-box/sub.txt`。需要多用户、SOCKS5 分流或 NAT 端口映射时，见下方「常用示例」。
+
 ## 常用示例
 
 ### 1) 启用 VLESS+WS（不启用 Argo，公网 WSS，自签证书）
