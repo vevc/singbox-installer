@@ -1373,8 +1373,11 @@ main() {
   log "Detected init system: ${INIT_SYSTEM}"
 
   DOWNLOAD_VERBOSE="$verbose"
+  # openssl is needed by gen_self_signed_cert(); include it here so --install-deps
+  # actually installs it (it's only invoked deep in the flow via need_cmd, and skipping
+  # auto-install caused "Missing required command: openssl" on minimal Alpine images).
   ensure_cmds_or_install "$install_deps" \
-    uname tar sed head tr cut dirname mkdir cat chmod install mktemp date
+    uname tar sed head tr cut dirname mkdir cat chmod install mktemp date openssl
   need_http_client
 
   local arch
