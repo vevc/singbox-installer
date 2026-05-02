@@ -1,6 +1,6 @@
 # singbox-installer
 
-一个面向个人使用的 `sing-box` 一键安装脚本（Linux + systemd），支持按**用户名分流**（`auth_user`）并可选将指定用户的流量转发到自定义 **SOCKS5 出站**。同时支持 **Cloudflare Tunnel（Argo）** 为 VLESS+WS 提供公网入口。
+一个面向个人使用的 `sing-box` 一键安装脚本（Linux，支持 **systemd** 与 **OpenRC**，例如 Alpine），支持按**用户名分流**（`auth_user`）并可选将指定用户的流量转发到自定义 **SOCKS5 出站**。同时支持 **Cloudflare Tunnel（Argo）** 为 VLESS+WS 提供公网入口。
 
 ## 功能
 
@@ -20,9 +20,9 @@
   - 生成 `/etc/sing-box/config.json`
   - 生成自签证书到 `/etc/sing-box/certs/`（HY2/TUIC 必需；VLESS 仅在未启用 Argo、以 WSS 对外时使用）
   - 若使用**受信任 CA 证书**（`--tls-cert-path` / `--tls-key-path`）并希望订阅链接里不写 `insecure`/`allowInsecure`，可加 `--tls-trusted`
-- **systemd 管理**
-  - 安装并启用 `/etc/systemd/system/sing-box.service`
-  - 可选安装并启用 `/etc/systemd/system/cloudflared.service`（启用 `--argo` 时）
+- **服务管理（自动适配 systemd / OpenRC）**
+  - systemd：`/etc/systemd/system/sing-box.service`、`/etc/systemd/system/cloudflared.service`
+  - OpenRC（如 Alpine）：`/etc/init.d/sing-box`、`/etc/init.d/cloudflared`，使用 `supervise-daemon` 实现自动重启；日志写入 `/var/log/sing-box.log`、`/var/log/cloudflared.log`
 - **生成订阅文件**
   - 输出到 `/var/lib/sing-box/sub.txt`
   - 链接数量通常为：**启用协议数 × 用户数**
@@ -155,9 +155,9 @@ curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/instal
 - **自签证书**：`/etc/sing-box/certs/server.crt`、`/etc/sing-box/certs/server.key`
 - **订阅文件**：`/var/lib/sing-box/sub.txt`
 - **manifest**：`/var/lib/sing-box/manifest.env`
-- **systemd units**：
-  - ` /etc/systemd/system/sing-box.service `
-  - ` /etc/systemd/system/cloudflared.service `（启用 `--argo` 时）
+- **服务文件**：
+  - systemd：`/etc/systemd/system/sing-box.service`、`/etc/systemd/system/cloudflared.service`（启用 `--argo` 时）
+  - OpenRC：`/etc/init.d/sing-box`、`/etc/init.d/cloudflared`（启用 `--argo` 时）；日志见 `/var/log/sing-box.log`、`/var/log/cloudflared.log`
 
 ## 卸载
 
@@ -176,6 +176,8 @@ curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/instal
 ## 依赖
 
 脚本会检查依赖命令；如缺失可加 `--install-deps` 让脚本自动安装（依赖发行版包管理器可用）。
+
+> Alpine 提示：脚本本身需要 `bash`，请先 `apk add bash`（以及 `openssl`、`curl`/`wget`、`tar` 等基础包；加 `--install-deps` 会尝试自动装）。OpenRC 与 `supervise-daemon` 在 Alpine 默认就有。
 
 ## License
 

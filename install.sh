@@ -27,9 +27,22 @@ MANIFEST_FILE="${STATE_DIR}/manifest.env"
 BIN_NAME="sing-box"
 DOWNLOAD_VERBOSE="false"
 
+# Init system: "systemd" or "openrc". Set by detect_init() in main()/uninstall_main().
+INIT_SYSTEM=""
+
+# Service file paths per init system.
+SINGBOX_SYSTEMD_UNIT="/etc/systemd/system/sing-box.service"
+CLOUDFLARED_SYSTEMD_UNIT="/etc/systemd/system/cloudflared.service"
+SINGBOX_OPENRC_INITD="/etc/init.d/sing-box"
+CLOUDFLARED_OPENRC_INITD="/etc/init.d/cloudflared"
+
+# OpenRC log files (systemd uses journald instead).
+SINGBOX_OPENRC_LOG="/var/log/sing-box.log"
+CLOUDFLARED_OPENRC_LOG="/var/log/cloudflared.log"
+
 usage() {
   cat <<'EOF'
-sing-box one-click installer (systemd, vless-ws/hy2/tuic + cloudflare argo tunnel)
+sing-box one-click installer (systemd or OpenRC; vless-ws/hy2/tuic + cloudflare argo tunnel)
 
 Usage:
   sudo ./install.sh [options]
@@ -159,6 +172,17 @@ read_os_id_like() {
     like="${ID_LIKE:-}"
   fi
   printf '%s|%s' "$id" "$like"
+}
+
+detect_init() {
+  # Prefer systemd when its runtime dir + tools are present; otherwise fall back to OpenRC.
+  if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
+    echo "systemd"; return 0
+  fi
+  if command -v rc-service >/dev/null 2>&1 && command -v rc-update >/dev/null 2>&1; then
+    echo "openrc"; return 0
+  fi
+  echo "unknown"
 }
 
 detect_pkg_manager() {
@@ -563,7 +587,9 @@ gen_self_signed_cert() {
   # openssl prints keygen progress ('.' and '+') to stderr; keep install logs clean.
   # On failure, dump stderr so the user can diagnose.
   local openssl_err
-  openssl_err="$(mktemp -t openssl.XXXXXX.err)" || die "Failed to create temp file"
+  # BusyBox mktemp requires TEMPLATE to end with XXXXXX (no trailing suffix), so
+  # we don't append `.err`. The file is only used to capture stderr; name doesn't matter.
+  openssl_err="$(mktemp -t openssl.XXXXXX)" || die "Failed to create temp file"
   if ! openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
     -keyout "$key_path" \
     -out "$crt_path" \
@@ -607,19 +633,26 @@ write_cloudflared_service() {
   local origin_url="$3"
   local argo_token="$4"
 
-  local unit_path="/etc/systemd/system/cloudflared.service"
-  local exec=""
-
+  local exec_args=""
   if [[ "$argo_mode" == "try" ]]; then
-    exec="${install_dir}/cloudflared tunnel --no-autoupdate --url ${origin_url}"
+    exec_args="tunnel --no-autoupdate --url ${origin_url}"
   elif [[ "$argo_mode" == "token" ]]; then
     # Named Tunnel: prefer Cloudflare-managed ingress (Public Hostname).
-    exec="${install_dir}/cloudflared tunnel --no-autoupdate run --token ${argo_token}"
+    exec_args="tunnel --no-autoupdate run --token ${argo_token}"
   else
     die "write_cloudflared_service called with invalid mode: ${argo_mode}"
   fi
 
-  cat >"$unit_path" <<EOF
+  case "$INIT_SYSTEM" in
+    systemd) write_cloudflared_systemd_unit "$install_dir" "$exec_args" ;;
+    openrc)  write_cloudflared_openrc_initd  "$install_dir" "$exec_args" ;;
+    *)       die "Unsupported init system: ${INIT_SYSTEM:-unknown}" ;;
+  esac
+}
+
+write_cloudflared_systemd_unit() {
+  local install_dir="$1" exec_args="$2"
+  cat >"$CLOUDFLARED_SYSTEMD_UNIT" <<EOF
 [Unit]
 Description=cloudflared tunnel
 After=network-online.target sing-box.service
@@ -627,7 +660,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=${exec}
+ExecStart=${install_dir}/cloudflared ${exec_args}
 Restart=on-failure
 RestartSec=2
 LimitNOFILE=1048576
@@ -637,8 +670,49 @@ WantedBy=multi-user.target
 EOF
 }
 
-# After cloudflared.service is running (Quick Tunnel), read the same process's URL from journald.
-# Matches the long-lived tunnel hostname; avoids a separate probe that could differ from systemd.
+write_cloudflared_openrc_initd() {
+  local install_dir="$1" exec_args="$2"
+  ensure_dir "$(dirname "$CLOUDFLARED_OPENRC_LOG")"
+  cat >"$CLOUDFLARED_OPENRC_INITD" <<EOF
+#!/sbin/openrc-run
+# Managed by singbox-installer. Do not edit by hand.
+
+name="cloudflared"
+description="cloudflared tunnel"
+
+command="${install_dir}/cloudflared"
+command_args="${exec_args}"
+
+supervisor=supervise-daemon
+respawn_delay=2
+
+output_log="${CLOUDFLARED_OPENRC_LOG}"
+error_log="${CLOUDFLARED_OPENRC_LOG}"
+
+rc_ulimit="-n 1048576"
+
+depend() {
+    need net
+    after net sing-box
+}
+EOF
+  chmod 0755 "$CLOUDFLARED_OPENRC_INITD"
+}
+
+# After cloudflared service is running (Quick Tunnel), extract the hostname assigned
+# by Cloudflare. systemd: read the same unit's logs from journald; OpenRC: tail the
+# log file written via supervise-daemon's output_log/error_log. Truncate the log
+# before starting the service in OpenRC mode to avoid picking up a stale domain.
+wait_trycloudflare_domain() {
+  local max_wait="${1:-60}"
+  local since_epoch="${2:-0}"
+  case "$INIT_SYSTEM" in
+    systemd) wait_trycloudflare_domain_from_journal "$max_wait" "$since_epoch" ;;
+    openrc)  wait_trycloudflare_domain_from_logfile "$max_wait" "$CLOUDFLARED_OPENRC_LOG" ;;
+    *)       die "Unsupported init system: ${INIT_SYSTEM:-unknown}" ;;
+  esac
+}
+
 wait_trycloudflare_domain_from_journal() {
   local max_wait="${1:-60}"
   local since_epoch="${2:-0}"
@@ -663,6 +737,32 @@ wait_trycloudflare_domain_from_journal() {
     if [[ -n "$domain" ]]; then
       printf '%s' "$domain"
       return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  return 1
+}
+
+wait_trycloudflare_domain_from_logfile() {
+  local max_wait="${1:-60}"
+  local logfile="${2:-$CLOUDFLARED_OPENRC_LOG}"
+  local elapsed=0
+  local domain=""
+
+  log_err "Waiting for Quick Tunnel hostname in ${logfile} (up to ${max_wait}s)..."
+  while [[ "$elapsed" -lt "$max_wait" ]]; do
+    if [[ -f "$logfile" ]]; then
+      domain="$(
+        tr -d '\r' <"$logfile" \
+          | sed -E $'s/\x1B\\[[0-9;]*[[:alpha:]]//g' \
+          | sed -n 's/.*https:\/\/\([^[:space:]]*\.trycloudflare\.com\).*/\1/p' \
+          | tail -n 1
+      )"
+      if [[ -n "$domain" ]]; then
+        printf '%s' "$domain"
+        return 0
+      fi
     fi
     sleep 1
     elapsed=$((elapsed + 1))
@@ -782,9 +882,16 @@ EOF
 write_singbox_service() {
   local install_dir="$1"
   local config_path="$2"
-  local unit_path="/etc/systemd/system/sing-box.service"
+  case "$INIT_SYSTEM" in
+    systemd) write_singbox_systemd_unit "$install_dir" "$config_path" ;;
+    openrc)  write_singbox_openrc_initd  "$install_dir" "$config_path" ;;
+    *)       die "Unsupported init system: ${INIT_SYSTEM:-unknown}" ;;
+  esac
+}
 
-  cat >"$unit_path" <<EOF
+write_singbox_systemd_unit() {
+  local install_dir="$1" config_path="$2"
+  cat >"$SINGBOX_SYSTEMD_UNIT" <<EOF
 [Unit]
 Description=sing-box service
 After=network-online.target
@@ -802,13 +909,76 @@ WantedBy=multi-user.target
 EOF
 }
 
-systemd_reload_enable_start() {
+write_singbox_openrc_initd() {
+  local install_dir="$1" config_path="$2"
+  ensure_dir "$(dirname "$SINGBOX_OPENRC_LOG")"
+  cat >"$SINGBOX_OPENRC_INITD" <<EOF
+#!/sbin/openrc-run
+# Managed by singbox-installer. Do not edit by hand.
+
+name="sing-box"
+description="sing-box service"
+
+command="${install_dir}/${BIN_NAME}"
+command_args="run -c ${config_path}"
+
+supervisor=supervise-daemon
+respawn_delay=2
+
+output_log="${SINGBOX_OPENRC_LOG}"
+error_log="${SINGBOX_OPENRC_LOG}"
+
+rc_ulimit="-n 1048576"
+
+depend() {
+    need net
+    after net
+}
+EOF
+  chmod 0755 "$SINGBOX_OPENRC_INITD"
+}
+
+service_enable_start() {
+  # svc: bare name (e.g. "sing-box", "cloudflared"). systemctl accepts both with
+  # and without the .service suffix; OpenRC uses the bare name directly.
   local svc="$1"
-  need_cmd systemctl
-  systemctl daemon-reload
-  # Ensure changes apply on re-run too.
-  systemctl enable "$svc" >/dev/null 2>&1 || true
-  systemctl restart "$svc"
+  case "$INIT_SYSTEM" in
+    systemd)
+      need_cmd systemctl
+      systemctl daemon-reload
+      # Ensure changes apply on re-run too.
+      systemctl enable "$svc" >/dev/null 2>&1 || true
+      systemctl restart "$svc"
+      ;;
+    openrc)
+      need_cmd rc-service
+      need_cmd rc-update
+      rc-update add "$svc" default >/dev/null 2>&1 || true
+      rc-service "$svc" restart
+      ;;
+    *)
+      die "Unsupported init system: ${INIT_SYSTEM:-unknown}"
+      ;;
+  esac
+}
+
+service_disable_stop() {
+  # Best-effort stop+disable; ignores missing tools/services.
+  local svc="$1"
+  case "$INIT_SYSTEM" in
+    systemd)
+      command -v systemctl >/dev/null 2>&1 || return 0
+      systemctl disable --now "$svc" >/dev/null 2>&1 || true
+      ;;
+    openrc)
+      if command -v rc-service >/dev/null 2>&1; then
+        rc-service "$svc" stop >/dev/null 2>&1 || true
+      fi
+      if command -v rc-update >/dev/null 2>&1; then
+        rc-update del "$svc" default >/dev/null 2>&1 || true
+      fi
+      ;;
+  esac
 }
 
 write_manifest() {
@@ -817,8 +987,21 @@ write_manifest() {
   local config_path="$3"
   local tls_cert_path="$4"
   local tls_key_path="$5"
-  local singbox_unit="/etc/systemd/system/sing-box.service"
-  local cloudflared_unit="/etc/systemd/system/cloudflared.service"
+
+  local singbox_unit="" cloudflared_unit=""
+  local singbox_log="" cloudflared_log=""
+  case "$INIT_SYSTEM" in
+    systemd)
+      singbox_unit="$SINGBOX_SYSTEMD_UNIT"
+      cloudflared_unit="$CLOUDFLARED_SYSTEMD_UNIT"
+      ;;
+    openrc)
+      singbox_unit="$SINGBOX_OPENRC_INITD"
+      cloudflared_unit="$CLOUDFLARED_OPENRC_INITD"
+      singbox_log="$SINGBOX_OPENRC_LOG"
+      cloudflared_log="$CLOUDFLARED_OPENRC_LOG"
+      ;;
+  esac
 
   ensure_dir "$STATE_DIR"
   cat >"$MANIFEST_FILE" <<EOF
@@ -828,10 +1011,13 @@ CONFIG_PATH=$(sh_quote "$config_path")
 TLS_CERT_PATH=$(sh_quote "$tls_cert_path")
 TLS_KEY_PATH=$(sh_quote "$tls_key_path")
 CERT_MANAGED=$(sh_quote "${CERT_MANAGED:-true}")
+INIT_SYSTEM=$(sh_quote "$INIT_SYSTEM")
 SINGBOX_BIN=$(sh_quote "$singbox_bin")
 CLOUDFLARED_BIN=$(sh_quote "$cloudflared_bin")
 SINGBOX_UNIT=$(sh_quote "$singbox_unit")
 CLOUDFLARED_UNIT=$(sh_quote "$cloudflared_unit")
+SINGBOX_LOG=$(sh_quote "$singbox_log")
+CLOUDFLARED_LOG=$(sh_quote "$cloudflared_log")
 EOF
   chmod 600 "$MANIFEST_FILE" 2>/dev/null || true
 }
@@ -866,8 +1052,10 @@ EOF
   local cert_dir
   cert_dir="$(dirname "$tls_cert_path")"
   local cert_managed="true"
-  local singbox_unit="/etc/systemd/system/sing-box.service"
-  local cloudflared_unit="/etc/systemd/system/cloudflared.service"
+  local singbox_unit=""
+  local cloudflared_unit=""
+  local singbox_log=""
+  local cloudflared_log=""
 
   if [[ -r "$MANIFEST_FILE" ]]; then
     # shellcheck disable=SC1090
@@ -879,15 +1067,36 @@ EOF
     tls_key_path="${TLS_KEY_PATH:-$tls_key_path}"
     cert_dir="$(dirname "$tls_cert_path")"
     cert_managed="${CERT_MANAGED:-$cert_managed}"
-    singbox_unit="${SINGBOX_UNIT:-$singbox_unit}"
-    cloudflared_unit="${CLOUDFLARED_UNIT:-$cloudflared_unit}"
+    INIT_SYSTEM="${INIT_SYSTEM:-}"
+    singbox_unit="${SINGBOX_UNIT:-}"
+    cloudflared_unit="${CLOUDFLARED_UNIT:-}"
+    singbox_log="${SINGBOX_LOG:-}"
+    cloudflared_log="${CLOUDFLARED_LOG:-}"
   fi
 
+  # Fall back to live detection when manifest is missing or pre-dates init-system field.
+  if [[ -z "$INIT_SYSTEM" ]]; then
+    INIT_SYSTEM="$(detect_init)"
+  fi
+
+  # Backfill paths for both init systems so we clean up any leftovers from older
+  # installs even if the manifest only knows about one.
+  local cleanup_units=()
+  local cleanup_logs=()
+  [[ -n "$singbox_unit"     ]] && cleanup_units+=("$singbox_unit")
+  [[ -n "$cloudflared_unit" ]] && cleanup_units+=("$cloudflared_unit")
+  cleanup_units+=("$SINGBOX_SYSTEMD_UNIT" "$CLOUDFLARED_SYSTEMD_UNIT" \
+                  "$SINGBOX_OPENRC_INITD" "$CLOUDFLARED_OPENRC_INITD")
+  [[ -n "$singbox_log"      ]] && cleanup_logs+=("$singbox_log")
+  [[ -n "$cloudflared_log"  ]] && cleanup_logs+=("$cloudflared_log")
+  cleanup_logs+=("$SINGBOX_OPENRC_LOG" "$CLOUDFLARED_OPENRC_LOG")
+
   log "Uninstall plan:"
+  log "  init_system: ${INIT_SYSTEM:-unknown}"
   log "  singbox_bin: ${singbox_bin}"
   log "  cloudflared_bin: ${cloudflared_bin}"
-  log "  singbox_unit: ${singbox_unit}"
-  log "  cloudflared_unit: ${cloudflared_unit}"
+  log "  service files: ${cleanup_units[*]}"
+  log "  log files: ${cleanup_logs[*]}"
   log "  config: ${config_path}"
   log "  tls_cert_path: ${tls_cert_path}"
   log "  tls_key_path: ${tls_key_path}"
@@ -900,18 +1109,35 @@ EOF
     return 0
   fi
 
+  # Stop+disable via both init systems best-effort, so this works regardless of
+  # what was actually used to install.
+  local prev_init="$INIT_SYSTEM"
   if command -v systemctl >/dev/null 2>&1; then
-    systemctl disable --now cloudflared.service >/dev/null 2>&1 || true
-    systemctl disable --now sing-box.service >/dev/null 2>&1 || true
+    INIT_SYSTEM="systemd"
+    service_disable_stop "cloudflared.service"
+    service_disable_stop "sing-box.service"
   fi
+  if command -v rc-service >/dev/null 2>&1; then
+    INIT_SYSTEM="openrc"
+    service_disable_stop "cloudflared"
+    service_disable_stop "sing-box"
+  fi
+  INIT_SYSTEM="$prev_init"
 
-  rm -f "$cloudflared_unit" "$singbox_unit" 2>/dev/null || true
+  local f
+  for f in "${cleanup_units[@]}"; do
+    rm -f "$f" 2>/dev/null || true
+  done
   if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
   fi
 
   rm -f "$singbox_bin" 2>/dev/null || true
   rm -f "$cloudflared_bin" 2>/dev/null || true
+
+  for f in "${cleanup_logs[@]}"; do
+    rm -f "$f" 2>/dev/null || true
+  done
 
   rm -f "$config_path" 2>/dev/null || true
   if [[ "$cert_managed" == "true" ]]; then
@@ -1103,6 +1329,12 @@ main() {
 
   is_root || die "Please run as root (use sudo)."
 
+  INIT_SYSTEM="$(detect_init)"
+  if [[ "$INIT_SYSTEM" == "unknown" ]]; then
+    die "No supported init system found (need systemd or OpenRC)."
+  fi
+  log "Detected init system: ${INIT_SYSTEM}"
+
   DOWNLOAD_VERBOSE="$verbose"
   ensure_cmds_or_install "$install_deps" \
     uname tar sed head tr cut dirname mkdir cat chmod install mktemp date
@@ -1204,7 +1436,9 @@ main() {
   if [[ -n "$argo_domain" ]]; then log "  argo_domain: ${argo_domain}"; fi
 
   local tmp_tgz
-  tmp_tgz="$(mktemp -t sing-box.XXXXXX.tar.gz)" || die "Failed to create temp tarball path"
+  # BusyBox mktemp requires TEMPLATE to end with XXXXXX (no trailing suffix). The
+  # extension is irrelevant to `tar -xzf`, which detects gzip from content/`-z`.
+  tmp_tgz="$(mktemp -t sing-box.XXXXXX)" || die "Failed to create temp tarball path"
   # EXIT runs after `main` returns; `local tmp_tgz` may be unset then (set -u).
   trap "rm -f $(sh_quote "$tmp_tgz")" EXIT
 
@@ -1258,7 +1492,7 @@ main() {
   "${install_dir}/${BIN_NAME}" check -c "$config_path" || die "Config validation failed: ${config_path}"
 
   write_singbox_service "$install_dir" "$config_path"
-  systemd_reload_enable_start "sing-box.service"
+  service_enable_start "sing-box"
 
   # Setup cloudflared if needed.
   if [[ "$argo_enabled" == "true" ]]; then
@@ -1280,12 +1514,23 @@ main() {
       write_cloudflared_service "$install_dir" "try" "$origin_url" ""
       local since_epoch
       since_epoch="$(date +%s)"
-      systemd_reload_enable_start "cloudflared.service"
-      argo_domain="$(wait_trycloudflare_domain_from_journal 60 "$since_epoch")"
-      [[ -n "$argo_domain" ]] || die "Failed to read Quick Tunnel domain from cloudflared logs. Try: journalctl -u cloudflared.service -n 80 --no-pager"
+      # OpenRC: truncate the log so we don't pick up a stale domain from a previous run.
+      if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+        ensure_dir "$(dirname "$CLOUDFLARED_OPENRC_LOG")"
+        : >"$CLOUDFLARED_OPENRC_LOG" 2>/dev/null || true
+      fi
+      service_enable_start "cloudflared"
+      argo_domain="$(wait_trycloudflare_domain 60 "$since_epoch")"
+      if [[ -z "$argo_domain" ]]; then
+        if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+          die "Failed to read Quick Tunnel domain from cloudflared logs. Try: journalctl -u cloudflared.service -n 80 --no-pager"
+        else
+          die "Failed to read Quick Tunnel domain from cloudflared logs. Try: tail -n 80 ${CLOUDFLARED_OPENRC_LOG}"
+        fi
+      fi
     else
       write_cloudflared_service "$install_dir" "token" "$origin_url" "$argo_token"
-      systemd_reload_enable_start "cloudflared.service"
+      service_enable_start "cloudflared"
     fi
 
     vless_public_host="$argo_domain"
