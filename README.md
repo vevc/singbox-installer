@@ -177,7 +177,10 @@ curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/instal
 
 脚本会检查依赖命令；如缺失可加 `--install-deps` 让脚本自动安装（依赖发行版包管理器可用）。
 
-> Alpine 提示：脚本本身需要 `bash`，请先 `apk add bash`（以及 `openssl`、`curl`/`wget`、`tar` 等基础包；加 `--install-deps` 会尝试自动装）。OpenRC 与 `supervise-daemon` 在 Alpine 默认就有。
+> Alpine 提示：
+>
+> - 脚本本身需要 `bash`，请先 `apk add bash`（以及 `openssl`、`curl`/`wget`、`tar` 等基础包；加 `--install-deps` 会自动装）。OpenRC 与 `supervise-daemon` 默认就有。
+> - sing-box / cloudflared 官方二进制是 **glibc** 动态链接，Alpine（musl）需要 `gcompat` 兼容层；加 `--install-deps` 会自动装，否则手动 `apk add gcompat`，否则会报 `cannot execute: required file not found`。
 
 ## License
 

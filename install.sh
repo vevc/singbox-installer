@@ -248,6 +248,38 @@ install_packages() {
   esac
 }
 
+is_alpine() {
+  local id=""
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release || true
+    id="${ID:-}"
+  fi
+  [[ "$id" == "alpine" ]]
+}
+
+ensure_alpine_glibc_compat() {
+  # sing-box / cloudflared official Linux builds are dynamically linked to glibc.
+  # Alpine uses musl and lacks the glibc loader, causing "cannot execute: required
+  # file not found". `gcompat` provides a shim so glibc-linked binaries can run.
+  local auto_install="$1"
+  is_alpine || return 0
+  command -v apk >/dev/null 2>&1 || return 0
+
+  if apk info -e gcompat >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "$auto_install" != "true" ]]; then
+    log_err "Alpine detected: sing-box requires glibc compatibility (package 'gcompat')."
+    log_err "  Re-run with --install-deps, or install manually: apk add gcompat"
+    return 0
+  fi
+
+  log "Installing gcompat (glibc compatibility for musl)..."
+  apk add --no-cache gcompat || die "Failed to install gcompat. Run manually: apk add gcompat"
+}
+
 ensure_cmds_or_install() {
   local auto_install="$1"; shift
   local required=("$@")
@@ -624,7 +656,12 @@ install_cloudflared() {
   download_file "$url" "$out"
 
   chmod 0755 "$out"
-  "$out" --version >/dev/null 2>&1 || die "cloudflared installed but failed to run"
+  if ! "$out" --version >/dev/null 2>&1; then
+    if is_alpine; then
+      log_err "Hint: on Alpine, run 'apk add gcompat' (or re-run with --install-deps)."
+    fi
+    die "cloudflared installed but failed to run"
+  fi
 }
 
 write_cloudflared_service() {
@@ -1447,7 +1484,16 @@ main() {
   download_release_tarball "$version" "$arch" "$tmp_tgz"
   install_binary_from_tarball "$tmp_tgz" "$install_dir" "$ver_in_file" "$arch"
 
-  "${install_dir}/${BIN_NAME}" version || die "Installed binary failed to run"
+  # On Alpine, the glibc-linked sing-box binary needs the `gcompat` shim.
+  ensure_alpine_glibc_compat "$install_deps"
+
+  if ! "${install_dir}/${BIN_NAME}" version >/dev/null 2>&1; then
+    if is_alpine; then
+      log_err "Hint: on Alpine, run 'apk add gcompat' (or re-run with --install-deps)."
+    fi
+    die "Installed binary failed to run"
+  fi
+  "${install_dir}/${BIN_NAME}" version
 
   if [[ "$argo_enabled" == "true" && "$vless_listen_port" == "0" ]]; then
     die "--argo requires --vless-port to be enabled (non-zero)"
