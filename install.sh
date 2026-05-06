@@ -66,6 +66,14 @@ EOF
   printf "  %-${w}s %s\n" "--user <name[:uuid]>" "add a user (repeatable). uuid auto-generated if omitted"
   printf "  %-${w}s %s\n" "--user-socks5 <spec>" "bind user to socks5 outbound (repeatable)"
   printf "  %-${w}s %s\n" "" "spec: name=host:port[:username:password]"
+  printf "  %-${w}s %s\n" "--user-http <spec>" "bind user to HTTP proxy outbound (repeatable)"
+  printf "  %-${w}s %s\n" "" "spec: name=host:port[:username:password]"
+  printf "  %-${w}s %s\n" "--user-https <spec>" "bind user to HTTPS proxy outbound (HTTP proxy over TLS) (repeatable)"
+  printf "  %-${w}s %s\n" "" "spec: name=host:port[:username:password]"
+  printf "  %-${w}s %s\n" "--user-https-sni <spec>" "set TLS SNI for user's HTTPS proxy (optional, repeatable)"
+  printf "  %-${w}s %s\n" "" "spec: name=server_name"
+  printf "  %-${w}s %s\n" "--user-https-insecure <spec>" "skip TLS verify for user's HTTPS proxy (default: false) (repeatable)"
+  printf "  %-${w}s %s\n" "" "spec: name=true|false"
   printf "  %-${w}s %s\n" "--vless-port <port|public:listen>" "vless+ws port (TCP). NAT mapping supported. set 0 to disable (default: 0)"
   printf "  %-${w}s %s\n" "--ws-path <path>" "websocket path for vless+ws (default: /)"
   printf "  %-${w}s %s\n" "--argo" "enable Cloudflare Tunnel for vless (default: disabled)"
@@ -450,6 +458,30 @@ EOF
     }
 EOF
   fi
+}
+
+build_http_outbound() {
+  local tag="$1" host="$2" port="$3" username="$4" password="$5" tls_enabled="${6:-false}" tls_sni="${7:-}" tls_insecure="${8:-false}"
+
+  local auth_block=""
+  if [[ -n "$username" ]]; then
+    auth_block=$',\n      "username": "'"$(json_escape "$username")"$'",\n      "password": "'"$(json_escape "$password")"$'"'
+  fi
+
+  local tls_block=""
+  if [[ "$tls_enabled" == "true" ]]; then
+    local sni="${tls_sni:-$host}"
+    tls_block=$',\n      "tls": {\n        "enabled": true,\n        "server_name": "'"$(json_escape "$sni")"$'",\n        "insecure": '"$([[ "$tls_insecure" == "true" ]] && echo true || echo false)"$'\n      }'
+  fi
+
+  cat <<EOF
+    {
+      "type": "http",
+      "tag": "$(json_escape "$tag")",
+      "server": "$(json_escape "$host")",
+      "server_port": ${port}${auth_block}${tls_block}
+    }
+EOF
 }
 
 build_route_rule_auth_user() {
@@ -848,13 +880,30 @@ write_config() {
     if [[ -n "$users_tuic" ]]; then users_tuic+=$',\n'; fi
     users_tuic+="${tuic_user}"
 
-    local socks_host="${USER_SOCKS_HOSTS[$idx]}"
-    local socks_port="${USER_SOCKS_PORTS[$idx]}"
-    local socks_user="${USER_SOCKS_USERS[$idx]}"
-    local socks_pass="${USER_SOCKS_PASSES[$idx]}"
-    if [[ -n "$socks_host" ]]; then
-      local tag="socks_$(sanitize_tag "$name")"
-      outbounds_extra+=("$(build_socks5_outbound "$tag" "$socks_host" "$socks_port" "$socks_user" "$socks_pass")")
+    local proxy_type="${USER_PROXY_TYPES[$idx]}"
+    local proxy_host="${USER_PROXY_HOSTS[$idx]}"
+    local proxy_port="${USER_PROXY_PORTS[$idx]}"
+    local proxy_user="${USER_PROXY_USERS[$idx]}"
+    local proxy_pass="${USER_PROXY_PASSES[$idx]}"
+    local proxy_sni="${USER_PROXY_HTTPS_SNIS[$idx]}"
+    local proxy_insecure="${USER_PROXY_HTTPS_INSECURES[$idx]}"
+
+    if [[ -n "$proxy_type" ]]; then
+      local tag="proxy_$(sanitize_tag "$name")"
+      case "$proxy_type" in
+        socks5)
+          outbounds_extra+=("$(build_socks5_outbound "$tag" "$proxy_host" "$proxy_port" "$proxy_user" "$proxy_pass")")
+          ;;
+        http)
+          outbounds_extra+=("$(build_http_outbound "$tag" "$proxy_host" "$proxy_port" "$proxy_user" "$proxy_pass" "false" "" "false")")
+          ;;
+        https)
+          outbounds_extra+=("$(build_http_outbound "$tag" "$proxy_host" "$proxy_port" "$proxy_user" "$proxy_pass" "true" "$proxy_sni" "$proxy_insecure")")
+          ;;
+        *)
+          die "Unknown proxy type for user ${name}: ${proxy_type}"
+          ;;
+      esac
       route_rules+=("$(build_route_rule_auth_user "$name" "$tag")")
     fi
   done
@@ -1284,10 +1333,15 @@ main() {
   USER_NAMES=()
   USER_UUIDS=()
   USER_TUIC_PASSWORDS=()
-  USER_SOCKS_HOSTS=()
-  USER_SOCKS_PORTS=()
-  USER_SOCKS_USERS=()
-  USER_SOCKS_PASSES=()
+  # Per-user outbound proxy (optional). One of: socks5/http/https.
+  USER_PROXY_TYPES=()
+  USER_PROXY_HOSTS=()
+  USER_PROXY_PORTS=()
+  USER_PROXY_USERS=()
+  USER_PROXY_PASSES=()
+  # HTTPS proxy (HTTP proxy over TLS) options.
+  USER_PROXY_HTTPS_SNIS=()
+  USER_PROXY_HTTPS_INSECURES=()
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1305,10 +1359,13 @@ main() {
         USER_NAMES+=("$name_part")
         USER_UUIDS+=("$uuid_part")
         USER_TUIC_PASSWORDS+=("") # fill later
-        USER_SOCKS_HOSTS+=("")
-        USER_SOCKS_PORTS+=("")
-        USER_SOCKS_USERS+=("")
-        USER_SOCKS_PASSES+=("")
+        USER_PROXY_TYPES+=("")
+        USER_PROXY_HOSTS+=("")
+        USER_PROXY_PORTS+=("")
+        USER_PROXY_USERS+=("")
+        USER_PROXY_PASSES+=("")
+        USER_PROXY_HTTPS_SNIS+=("")
+        USER_PROXY_HTTPS_INSECURES+=("false")
         ;;
       --user-socks5)
         # name=host:port[:username:password]
@@ -1334,15 +1391,101 @@ main() {
         local i
         for i in "${!USER_NAMES[@]}"; do
           if [[ "${USER_NAMES[$i]}" == "$uname" ]]; then
-            USER_SOCKS_HOSTS[$i]="$host_part"
-            USER_SOCKS_PORTS[$i]="$port_part"
-            USER_SOCKS_USERS[$i]="$su"
-            USER_SOCKS_PASSES[$i]="$sp"
+            if [[ -n "${USER_PROXY_TYPES[$i]}" && "${USER_PROXY_TYPES[$i]}" != "socks5" ]]; then
+              die "User ${uname} already bound to proxy type: ${USER_PROXY_TYPES[$i]} (cannot also set socks5)"
+            fi
+            USER_PROXY_TYPES[$i]="socks5"
+            USER_PROXY_HOSTS[$i]="$host_part"
+            USER_PROXY_PORTS[$i]="$port_part"
+            USER_PROXY_USERS[$i]="$su"
+            USER_PROXY_PASSES[$i]="$sp"
             found="true"
             break
           fi
         done
         [[ "$found" == "true" ]] || die "--user-socks5 references unknown user: $uname (add --user first)"
+        ;;
+      --user-http|--user-https)
+        # name=host:port[:username:password]
+        local flag="$1"
+        local spec="${2:-}"; shift 2
+        [[ -n "$spec" ]] || die "${flag} requires value name=host:port[:username:password]"
+        local uname="${spec%%=*}"
+        local rest="${spec#*=}"
+        [[ -n "$uname" && "$rest" != "$spec" ]] || die "Invalid ${flag} value: $spec"
+        local host_part="${rest%%:*}"
+        local after_host="${rest#*:}"
+        [[ -n "$host_part" && "$after_host" != "$rest" ]] || die "Invalid ${flag} value: $spec"
+        local port_part="${after_host%%:*}"
+        local creds_part=""
+        if [[ "$after_host" == *:* ]]; then creds_part="${after_host#*:}"; fi
+        local su=""; local sp=""
+        if [[ -n "$creds_part" ]]; then
+          su="${creds_part%%:*}"
+          if [[ "$creds_part" == *:* ]]; then sp="${creds_part#*:}"; fi
+        fi
+
+        local ptype="http"
+        if [[ "$flag" == "--user-https" ]]; then ptype="https"; fi
+
+        local found="false"
+        local i
+        for i in "${!USER_NAMES[@]}"; do
+          if [[ "${USER_NAMES[$i]}" == "$uname" ]]; then
+            if [[ -n "${USER_PROXY_TYPES[$i]}" && "${USER_PROXY_TYPES[$i]}" != "$ptype" ]]; then
+              die "User ${uname} already bound to proxy type: ${USER_PROXY_TYPES[$i]} (cannot also set ${ptype})"
+            fi
+            USER_PROXY_TYPES[$i]="$ptype"
+            USER_PROXY_HOSTS[$i]="$host_part"
+            USER_PROXY_PORTS[$i]="$port_part"
+            USER_PROXY_USERS[$i]="$su"
+            USER_PROXY_PASSES[$i]="$sp"
+            # Default SNI for https proxy: use host (can be overridden by --user-https-sni).
+            if [[ "$ptype" == "https" && -z "${USER_PROXY_HTTPS_SNIS[$i]}" ]]; then
+              USER_PROXY_HTTPS_SNIS[$i]="$host_part"
+            fi
+            found="true"
+            break
+          fi
+        done
+        [[ "$found" == "true" ]] || die "${flag} references unknown user: $uname (add --user first)"
+        ;;
+      --user-https-sni)
+        # name=server_name
+        local spec="${2:-}"; shift 2
+        [[ -n "$spec" ]] || die "--user-https-sni requires value name=server_name"
+        local uname="${spec%%=*}"
+        local sni="${spec#*=}"
+        [[ -n "$uname" && -n "$sni" && "$sni" != "$spec" ]] || die "Invalid --user-https-sni value: $spec"
+        local found="false"
+        local i
+        for i in "${!USER_NAMES[@]}"; do
+          if [[ "${USER_NAMES[$i]}" == "$uname" ]]; then
+            USER_PROXY_HTTPS_SNIS[$i]="$sni"
+            found="true"
+            break
+          fi
+        done
+        [[ "$found" == "true" ]] || die "--user-https-sni references unknown user: $uname (add --user first)"
+        ;;
+      --user-https-insecure)
+        # name=true|false
+        local spec="${2:-}"; shift 2
+        [[ -n "$spec" ]] || die "--user-https-insecure requires value name=true|false"
+        local uname="${spec%%=*}"
+        local val="${spec#*=}"
+        [[ -n "$uname" && -n "$val" && "$val" != "$spec" ]] || die "Invalid --user-https-insecure value: $spec"
+        [[ "$val" == "true" || "$val" == "false" ]] || die "Invalid --user-https-insecure value: $spec (expected true|false)"
+        local found="false"
+        local i
+        for i in "${!USER_NAMES[@]}"; do
+          if [[ "${USER_NAMES[$i]}" == "$uname" ]]; then
+            USER_PROXY_HTTPS_INSECURES[$i]="$val"
+            found="true"
+            break
+          fi
+        done
+        [[ "$found" == "true" ]] || die "--user-https-insecure references unknown user: $uname (add --user first)"
         ;;
       --version) version="${2:-}"; shift 2 ;;
       --install-dir) install_dir="${2:-}"; shift 2 ;;
@@ -1389,10 +1532,13 @@ main() {
     USER_NAMES+=("user")
     USER_UUIDS+=("")
     USER_TUIC_PASSWORDS+=("")
-    USER_SOCKS_HOSTS+=("")
-    USER_SOCKS_PORTS+=("")
-    USER_SOCKS_USERS+=("")
-    USER_SOCKS_PASSES+=("")
+    USER_PROXY_TYPES+=("")
+    USER_PROXY_HOSTS+=("")
+    USER_PROXY_PORTS+=("")
+    USER_PROXY_USERS+=("")
+    USER_PROXY_PASSES+=("")
+    USER_PROXY_HTTPS_SNIS+=("")
+    USER_PROXY_HTTPS_INSECURES+=("false")
   fi
 
   # Fill UUIDs and per-user TUIC passwords.
@@ -1402,6 +1548,21 @@ main() {
       USER_UUIDS[$idx]="$(gen_uuid)"
     fi
     USER_TUIC_PASSWORDS[$idx]="${USER_UUIDS[$idx]}"
+
+    # Validate per-user proxy config.
+    local ptype="${USER_PROXY_TYPES[$idx]}"
+    if [[ "$ptype" == "https" ]]; then
+      local p_sni="${USER_PROXY_HTTPS_SNIS[$idx]}"
+      [[ -n "$p_sni" ]] || USER_PROXY_HTTPS_SNIS[$idx]="${USER_PROXY_HOSTS[$idx]}"
+    else
+      # Non-https proxy should not have https-only options.
+      if [[ -n "${USER_PROXY_HTTPS_SNIS[$idx]}" ]]; then
+        die "User ${USER_NAMES[$idx]} has --user-https-sni set but is not using --user-https"
+      fi
+      if [[ "${USER_PROXY_HTTPS_INSECURES[$idx]}" != "false" ]]; then
+        die "User ${USER_NAMES[$idx]} has --user-https-insecure set but is not using --user-https"
+      fi
+    fi
   done
 
   if [[ -z "$host" ]]; then

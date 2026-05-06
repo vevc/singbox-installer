@@ -1,6 +1,6 @@
 # singbox-installer
 
-一个面向个人使用的 `sing-box` 一键安装脚本（Linux，支持 **systemd** 与 **OpenRC**，例如 Alpine），支持按**用户名分流**（`auth_user`）并可选将指定用户的流量转发到自定义 **SOCKS5 出站**。同时支持 **Cloudflare Tunnel（Argo）** 为 VLESS+WS 提供公网入口。
+一个面向个人使用的 `sing-box` 一键安装脚本（Linux，支持 **systemd** 与 **OpenRC**，例如 Alpine），支持按**用户名分流**（`auth_user`），并可选将指定用户的流量转发到自定义的代理出站（**SOCKS5 / HTTP / HTTPS**）。同时支持 **Cloudflare Tunnel（Argo）** 为 VLESS+WS 提供公网入口。
 
 ## 功能
 
@@ -15,6 +15,8 @@
 - **多用户管理**
   - `--user <name[:uuid]>` 可重复添加用户（uuid 可省略自动生成）
   - `--user-socks5 name=host:port[:username:password]` 为指定用户绑定 SOCKS5 出站
+  - `--user-http name=host:port[:username:password]` 为指定用户绑定 HTTP 代理出站
+  - `--user-https name=host:port[:username:password]` 为指定用户绑定 HTTPS 代理出站（HTTP 代理 over TLS，可配 `--user-https-sni/--user-https-insecure`）
   - 服务端使用 `route.rules[].auth_user` 按用户名分流到不同 outbound
 - **自动生成配置/证书**
   - 生成 `/etc/sing-box/config.json`
@@ -114,7 +116,7 @@ curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/instal
 - 你给某个用户绑定了 SOCKS5，那么这个用户无论用 **VLESS/HY2/TUIC** 哪条入站进来，都会走同一个 SOCKS5 出站。
 - 订阅链接数量通常是：**启用协议数 × 用户数**。例如 3 个协议 + 3 个用户，会生成 **9 条**链接；你只需要导入/使用其中你想用的那几条即可（链接名称里会带用户名与协议类型）。
 
-`--user-socks5` 格式为 `用户名=地址:端口[:socks用户名[:socks密码]]`。下面示例用 **美国/台湾/日本** 三条 SOCKS5 来演示“落地到不同国家”的写法（请替换成你的真实 SOCKS5），并额外保留一个 `direct` 用户作为**不走代理**的默认用户。
+`--user-socks5` 格式为 `用户名=地址:端口[:socks用户名[:socks密码]]`。下面示例用 **美国/台湾/日本** 三条 SOCKS5 来演示“落地到不同国家”的写法（请替换成你的真实 SOCKS5），并额外保留一个 `direct` 用户作为**不走代理**的默认用户。若你有 HTTP/HTTPS 代理，可用 `--user-http/--user-https`，格式相同。
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/install.sh" | sudo bash -s -- \
@@ -129,6 +131,9 @@ curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/instal
   --user-socks5 us=127.0.0.1:1081 \
   --user-socks5 tw=10.0.0.5:1080:tw-user \
   --user-socks5 jp=192.168.1.99:7890:jp-user:jp-pass
+
+# 也可以把某个用户改成走 HTTPS 代理（HTTP proxy over TLS）：
+#   --user-https us=proxy.example.com:443:username:password
 ```
 
 - **美国落地（无认证）**：`us=127.0.0.1:1081` → 仅 `主机:端口`。
