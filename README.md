@@ -193,4 +193,6 @@ curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/instal
 
 ## 赞助
 
+- 感谢 [Thordata](https://dashboard.thordata.com/zh/register?invitation_code=619S6RWH) 提供赞助支持。
+
 - 感谢 [TalorData](https://talordata.com/?campaignid=6200Bs8MUgqRU4D4&utm_source=YouTube&utm_term=vevcore) 提供赞助支持。
