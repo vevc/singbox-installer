@@ -116,7 +116,7 @@ curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/instal
 - 你给某个用户绑定了 SOCKS5，那么这个用户无论用 **VLESS/HY2/TUIC** 哪条入站进来，都会走同一个 SOCKS5 出站。
 - 订阅链接数量通常是：**启用协议数 × 用户数**。例如 3 个协议 + 3 个用户，会生成 **9 条**链接；你只需要导入/使用其中你想用的那几条即可（链接名称里会带用户名与协议类型）。
 
-`--user-socks5` 格式为 `用户名=地址:端口[:socks用户名[:socks密码]]`。下面示例用 **美国/台湾/日本** 三条 SOCKS5 来演示“落地到不同国家”的写法（请替换成你的真实 SOCKS5），并额外保留一个 `direct` 用户作为**不走代理**的默认用户。若你有 HTTP/HTTPS 代理，可用 `--user-http/--user-https`，格式相同。
+`--user-socks5` 格式为 `用户名=地址:端口[:socks用户名[:socks密码]]`。下面示例用 **美国/荷兰/日本** 三条 SOCKS5 来演示“落地到不同国家”的写法（请替换成你的真实 SOCKS5），并额外保留一个 `direct` 用户作为**不走代理**的默认用户。若你有 HTTP/HTTPS 代理，可用 `--user-http/--user-https`，格式相同。
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/install.sh" | sudo bash -s -- \
@@ -126,10 +126,10 @@ curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/instal
   --tuic-port 9443 \
   --user direct \
   --user us \
-  --user tw \
+  --user nl \
   --user jp \
   --user-socks5 us=127.0.0.1:1081 \
-  --user-socks5 tw=10.0.0.5:1080:tw-user \
+  --user-socks5 nl=10.0.0.5:1080:nl-user \
   --user-socks5 jp=192.168.1.99:7890:jp-user:jp-pass
 
 # 也可以把某个用户改成走 HTTPS 代理（HTTP proxy over TLS）：
@@ -137,7 +137,7 @@ curl -fsSL "https://raw.githubusercontent.com/vevc/singbox-installer/main/instal
 ```
 
 - **美国落地（无认证）**：`us=127.0.0.1:1081` → 仅 `主机:端口`。
-- **台湾落地（仅用户名）**：`tw=10.0.0.5:1080:tw-user` → 只填 SOCKS 用户名（密码留空）。
+- **荷兰落地（仅用户名）**：`nl=10.0.0.5:1080:nl-user` → 只填 SOCKS 用户名（密码留空）。
 - **日本落地（用户名+密码）**：`jp=192.168.1.99:7890:jp-user:jp-pass` → 用户名与密码都写齐。说明：这一行里 `:` 用来分段，**密码里不要包含 `:`**，否则解析可能错位/不完整。
 
 如果你还希望让 VLESS 走 Cloudflare Tunnel（Argo），在上面的命令里加上（Quick Tunnel）：
