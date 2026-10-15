@@ -21,7 +21,11 @@
 - **自动生成配置/证书**
   - 生成 `/etc/sing-box/config.json`
   - 生成自签证书到 `/etc/sing-box/certs/`（HY2/TUIC 必需；VLESS 仅在未启用 Argo、以 WSS 对外时使用）
-  - 若使用**受信任 CA 证书**（`--tls-cert-path` / `--tls-key-path`）并希望订阅链接里不写 `insecure`/`allowInsecure`，可加 `--tls-trusted`
+  - 自签/非受信任证书场景下：
+    - 订阅链接自动附加 `allowInsecure=1&insecure=1&allow_insecure=1` 多种兼容参数
+    - VLESS 链接自动计算并包含证书 SHA-256 指纹 `pcs` 参数（适配 Xray-core / v2rayN 等新版内核的证书固定要求）
+    - HY2 链接自动计算并包含 `pinSHA256` 参数（Hysteria 2 官方证书锁定标准）
+  - 若使用**受信任 CA 证书**（`--tls-cert-path` / `--tls-key-path`）并希望订阅链接里不写跳过证书验证与指纹锁定参数，可加 `--tls-trusted`
 - **服务管理（自动适配 systemd / OpenRC）**
   - systemd：`/etc/systemd/system/sing-box.service`、`/etc/systemd/system/cloudflared.service`
   - OpenRC（如 Alpine）：`/etc/init.d/sing-box`、`/etc/init.d/cloudflared`，使用 `supervise-daemon` 实现自动重启；日志写入 `/var/log/sing-box.log`、`/var/log/cloudflared.log`

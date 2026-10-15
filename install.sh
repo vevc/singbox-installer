@@ -61,7 +61,7 @@ EOF
   printf "  %-${w}s %s\n" "--tls-key-path <path>" "TLS private key path (PEM). When set, --tls-cert-path is required"
   printf "  %-${w}s %s\n" "--tls-server-name <name>" "TLS server name (SNI). Used in share links as sni/host (default: www.bing.com)"
   printf "  %-${w}s %s\n" "--tls-cert-name <name>" "Name used when generating a self-signed cert (CN) (default: www.bing.com)"
-  printf "  %-${w}s %s\n" "--tls-trusted" "treat TLS cert as trusted; omit insecure/allowInsecure in share links"
+  printf "  %-${w}s %s\n" "--tls-trusted" "treat TLS cert as trusted; omit insecure/pinSHA256/pcs in share links"
   printf "  %-${w}s %s\n" "--host <public_ip>" "address used in subscription (default: auto-detect)"
   printf "  %-${w}s %s\n" "--user <name[:uuid]>" "add a user (repeatable). uuid auto-generated if omitted"
   printf "  %-${w}s %s\n" "--user-socks5 <spec>" "bind user to socks5 outbound (repeatable)"
@@ -90,8 +90,8 @@ EOF
   cat <<'EOF'
 
 Notes:
-  - By default a self-signed certificate is generated; clients usually need insecure/skip TLS verify in share links.
-  - With a trusted CA certificate, pass --tls-trusted so insecure/allowInsecure are omitted from share links.
+  - By default a self-signed certificate is generated; share links include allowInsecure/insecure/allow_insecure and pcs/pinSHA256 for certificate pinning.
+  - With a trusted CA certificate, pass --tls-trusted so insecure flags and certificate pins are omitted from share links.
   - vless+ws behavior:
       - argo disabled: vless is exposed publicly as WSS with self-signed cert.
       - argo enabled: vless listens on 127.0.0.1 with plain WS; cloudflared provides public HTTPS.
@@ -670,6 +670,30 @@ gen_self_signed_cert() {
   CERT_MANAGED="true"
 }
 
+get_cert_sha256() {
+  local cert_path="$1"
+  [[ -s "$cert_path" ]] || return 0
+  need_cmd openssl
+  local fp=""
+  # Extract SHA-256 fingerprint: 64-char uppercase hex string
+  fp="$(openssl x509 -in "$cert_path" -noout -fingerprint -sha256 2>/dev/null \
+    | sed 's/^.*=//' \
+    | tr -d ':\r\n ' \
+    | tr '[:lower:]' '[:upper:]')"
+
+  if [[ -z "$fp" || ${#fp} -ne 64 ]]; then
+    fp="$(openssl x509 -in "$cert_path" -outform DER 2>/dev/null \
+      | openssl dgst -sha256 2>/dev/null \
+      | sed 's/^.*= *//' \
+      | tr -d ':\r\n ' \
+      | tr '[:lower:]' '[:upper:]')"
+  fi
+
+  if [[ ${#fp} -eq 64 ]]; then
+    printf '%s' "$fp"
+  fi
+}
+
 install_cloudflared() {
   local install_dir="$1"
   local arch
@@ -1241,7 +1265,7 @@ EOF
 }
 
 write_subscription() {
-  local host="$1" vless_port="$2" hy2_port="$3" tuic_port="$4" ws_path="$5" vless_public_host="$6" vless_public_port="$7" vless_public_security="$8" argo_enabled="${9:-false}" tls_server_name="${10:-www.bing.com}" tls_trusted="${11:-false}"
+  local host="$1" vless_port="$2" hy2_port="$3" tuic_port="$4" ws_path="$5" vless_public_host="$6" vless_public_port="$7" vless_public_security="$8" argo_enabled="${9:-false}" tls_server_name="${10:-www.bing.com}" tls_trusted="${11:-false}" tls_cert_path="${12:-}"
 
   ensure_dir "$STATE_DIR"
 
@@ -1249,6 +1273,11 @@ write_subscription() {
   local enc_sni_cert enc_sni_public
   enc_sni_cert="$(uri_encode_query_value "$tls_server_name")"
   enc_sni_public="$(uri_encode_query_value "$vless_public_host")"
+
+  local cert_sha256=""
+  if [[ "$tls_trusted" != "true" && -n "$tls_cert_path" ]]; then
+    cert_sha256="$(get_cert_sha256 "$tls_cert_path")"
+  fi
 
   local idx
   for idx in "${!USER_NAMES[@]}"; do
@@ -1276,7 +1305,10 @@ write_subscription() {
           vq+="&sni=${enc_sni_public}"
         else
           if [[ "$tls_trusted" != "true" ]]; then
-            vq+="&allowInsecure=1&insecure=1"
+            vq+="&allowInsecure=1&insecure=1&allow_insecure=1"
+            if [[ -n "$cert_sha256" ]]; then
+              vq+="&pcs=${cert_sha256}"
+            fi
           fi
           vq+="&sni=${enc_sni_cert}"
         fi
@@ -1288,7 +1320,11 @@ write_subscription() {
     if [[ "$hy2_port" != "0" ]]; then
       local hq="alpn=h3&sni=${enc_sni_cert}"
       if [[ "$tls_trusted" != "true" ]]; then
-        hq="insecure=1&allowInsecure=1&${hq}"
+        local hinsecure="allowInsecure=1&insecure=1&allow_insecure=1"
+        if [[ -n "$cert_sha256" ]]; then
+          hinsecure+="&pinSHA256=${cert_sha256}"
+        fi
+        hq="${hinsecure}&${hq}"
       fi
       lines+=("hy2://${uuid}@${host}:${hy2_port}?${hq}#${name}-hy2")
     fi
@@ -1296,7 +1332,7 @@ write_subscription() {
     if [[ "$tuic_port" != "0" ]]; then
       local tq="congestion_control=bbr&alpn=h3&sni=${enc_sni_cert}"
       if [[ "$tls_trusted" != "true" ]]; then
-        tq="${tq}&insecure=1&allowInsecure=1"
+        tq="${tq}&allowInsecure=1&insecure=1&allow_insecure=1"
       fi
       lines+=("tuic://${uuid}:${tuic_pw}@${host}:${tuic_port}?${tq}#${name}-tuic")
     fi
@@ -1746,7 +1782,7 @@ main() {
     vless_public_host="$argo_domain"
   fi
 
-  write_subscription "$host" "$vless_public_port" "$hy2_public_port" "$tuic_public_port" "$ws_path" "$vless_public_host" "$vless_sub_port" "$vless_public_security" "$argo_enabled" "$tls_server_name" "$tls_trusted"
+  write_subscription "$host" "$vless_public_port" "$hy2_public_port" "$tuic_public_port" "$ws_path" "$vless_public_host" "$vless_sub_port" "$vless_public_security" "$argo_enabled" "$tls_server_name" "$tls_trusted" "$tls_cert_path"
   write_manifest "${install_dir}/${BIN_NAME}" "${install_dir}/cloudflared" "$config_path" "$tls_cert_path" "$tls_key_path"
 
   log "Installed ${BIN_NAME} to ${install_dir}/${BIN_NAME}"
@@ -1756,6 +1792,11 @@ main() {
       log "Cert: ${tls_cert_path} (self-signed)"
     else
       log "Cert: ${tls_cert_path} (existing)"
+    fi
+    local cert_sha256
+    cert_sha256="$(get_cert_sha256 "$tls_cert_path")"
+    if [[ -n "$cert_sha256" ]]; then
+      log "Cert SHA256: ${cert_sha256}"
     fi
   fi
   log "Subscription file: ${SUB_FILE}"
